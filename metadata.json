@@ -1,0 +1,6 @@
+{
+  "name": "Retail POS",
+  "description": "A professional native mobile POS (Point of Sale) system for retail businesses to manage sales, products, inventory, purchases, payments, cashiers, and reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
