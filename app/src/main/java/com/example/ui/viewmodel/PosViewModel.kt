@@ -3,7 +3,10 @@ package com.example.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.ai.AiAssistantManager
 import com.example.data.model.AuditLogEntity
+import com.example.data.model.BundleDealEntity
+import com.example.data.model.ChatMessage
 import com.example.data.model.CustomerEntity
 import com.example.data.model.NotificationEntity
 import com.example.data.model.ProductEntity
@@ -92,6 +95,88 @@ class PosViewModel(private val repository: PosRepository) : ViewModel() {
 
     val unreadNotificationsCount: StateFlow<Int> = repository.unreadNotificationsCount
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val bundleDeals: StateFlow<List<BundleDealEntity>> = repository.allBundleDeals
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // --- AI Chatbot Assistant ---
+    private val aiAssistant = AiAssistantManager()
+
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(
+        listOf(
+            ChatMessage(
+                isUser = false,
+                text = "👋 Hello! Main hoon aapka **POS AI Assistant & Offers Finder** ✨\n\nAap mujhse kisi bhi product ki **bundle deal, active discount offers, ya clearance bachat** ke baare mein direct pooch sakte hain — manually search karne ki zaroorat nahi!\n\nNeechay diye gaye quick buttons tap karein ya apna sawal type karein:"
+            )
+        )
+    )
+    val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
+
+    private val _isAiThinking = MutableStateFlow(false)
+    val isAiThinking: StateFlow<Boolean> = _isAiThinking.asStateFlow()
+
+    fun sendChatMessage(query: String) {
+        if (query.isBlank()) return
+        val userMsg = ChatMessage(isUser = true, text = query.trim())
+        _chatMessages.value = _chatMessages.value + userMsg
+        _isAiThinking.value = true
+
+        viewModelScope.launch {
+            val activeDeals = repository.getActiveBundleDeals()
+            val allProds = products.value
+            val response = aiAssistant.generateResponse(query, allProds, activeDeals)
+            _chatMessages.value = _chatMessages.value + response
+            _isAiThinking.value = false
+        }
+    }
+
+    fun clearChat() {
+        _chatMessages.value = listOf(
+            ChatMessage(
+                isUser = false,
+                text = "👋 Chat reset kar di gayi hai! Mujhse koi bhi new offer ya bundle deal poochein."
+            )
+        )
+    }
+
+    fun applyBundleDealToCart(deal: BundleDealEntity, onResult: (Boolean, String) -> Unit) {
+        val skus = deal.productSkus.split(",").map { it.trim() }
+        val allProds = products.value
+        val matched = allProds.filter { it.sku in skus }
+        if (matched.isEmpty()) {
+            onResult(false, "Products for '${deal.title}' not found in catalog.")
+            return
+        }
+        val outOfStock = matched.filter { it.currentStock <= 0 }
+        if (outOfStock.isNotEmpty()) {
+            onResult(false, "${outOfStock.first().name} is out of stock.")
+            return
+        }
+
+        val currentList = _cartItems.value.toMutableList()
+        for (prod in matched) {
+            val existingIndex = currentList.indexOfFirst { it.product.id == prod.id }
+            if (existingIndex >= 0) {
+                val ex = currentList[existingIndex]
+                if (ex.quantity < prod.currentStock) {
+                    currentList[existingIndex] = ex.copy(
+                        quantity = ex.quantity + 1,
+                        itemDiscountPercent = deal.discountPercent
+                    )
+                }
+            } else {
+                currentList.add(
+                    CartItem(
+                        product = prod,
+                        quantity = 1,
+                        itemDiscountPercent = deal.discountPercent
+                    )
+                )
+            }
+        }
+        _cartItems.value = currentList
+        onResult(true, "Applied '${deal.title}' to cart with ${deal.discountPercent.toInt()}% discount!")
+    }
 
     init {
         viewModelScope.launch {

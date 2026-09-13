@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Discount
@@ -95,7 +96,8 @@ import com.example.ui.viewmodel.PosViewModel
 @Composable
 fun PosScreen(
     viewModel: PosViewModel,
-    onProceedToPayment: () -> Unit
+    onProceedToPayment: () -> Unit,
+    onOpenAiAssistant: (() -> Unit)? = null
 ) {
     val products by viewModel.products.collectAsState()
     val cartItems by viewModel.cartItems.collectAsState()
@@ -296,6 +298,24 @@ fun PosScreen(
                             contentDescription = "Scan Barcode",
                             tint = Color.White
                         )
+                    }
+
+                    if (onOpenAiAssistant != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        IconButton(
+                            onClick = onOpenAiAssistant,
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "Ask AI for Deals",
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
                     }
                 }
 

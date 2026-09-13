@@ -7,6 +7,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.example.data.model.AuditLogEntity
+import com.example.data.model.BundleDealEntity
 import com.example.data.model.CustomerEntity
 import com.example.data.model.NotificationEntity
 import com.example.data.model.ProductEntity
@@ -165,4 +166,23 @@ interface PosDao {
 
     @Query("UPDATE notifications SET isRead = 1 WHERE isRead = 0")
     suspend fun markAllNotificationsAsRead()
+
+    // --- Bundle Deals & Promotions ---
+    @Query("SELECT * FROM bundle_deals ORDER BY id ASC")
+    fun getAllBundleDealsFlow(): Flow<List<BundleDealEntity>>
+
+    @Query("SELECT * FROM bundle_deals WHERE isActive = 1")
+    suspend fun getActiveBundleDeals(): List<BundleDealEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBundleDeal(deal: BundleDealEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBundleDeals(deals: List<BundleDealEntity>)
+
+    @Update
+    suspend fun updateBundleDeal(deal: BundleDealEntity)
+
+    @Delete
+    suspend fun deleteBundleDeal(deal: BundleDealEntity)
 }

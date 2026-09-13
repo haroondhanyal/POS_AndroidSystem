@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.data.dao.PosDao
 import com.example.data.model.AuditLogEntity
+import com.example.data.model.BundleDealEntity
 import com.example.data.model.CustomerEntity
 import com.example.data.model.NotificationEntity
 import com.example.data.model.ProductEntity
@@ -29,9 +30,10 @@ import com.example.data.model.UserEntity
         CustomerEntity::class,
         SupplierEntity::class,
         AuditLogEntity::class,
-        NotificationEntity::class
+        NotificationEntity::class,
+        BundleDealEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

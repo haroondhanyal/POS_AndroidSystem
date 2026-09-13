@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Inventory
@@ -69,6 +70,7 @@ import com.example.ui.components.DrawerThemeSelectorSection
 import com.example.ui.components.RoleBadge
 import com.example.ui.components.ThemeSelectorDialog
 import com.example.ui.components.getThemeIcon
+import com.example.ui.theme.PosAccent
 import com.example.ui.theme.PosError
 import com.example.ui.theme.PosPrimary
 import com.example.ui.theme.PosSuccess
@@ -78,6 +80,7 @@ import kotlinx.coroutines.launch
 sealed class ScreenTab(val title: String, val icon: ImageVector) {
     object Dashboard : ScreenTab("Dashboard", Icons.Default.Dashboard)
     object Pos : ScreenTab("Register", Icons.Default.PointOfSale)
+    object AiAssistant : ScreenTab("AI Deals", Icons.Default.AutoAwesome)
     object Products : ScreenTab("Products", Icons.Default.ShoppingBag)
     object Inventory : ScreenTab("Inventory", Icons.Default.Inventory)
     object Sales : ScreenTab("Orders", Icons.Default.ReceiptLong)
@@ -179,6 +182,7 @@ fun MainApp(
                     val allTabs = listOf(
                         ScreenTab.Dashboard,
                         ScreenTab.Pos,
+                        ScreenTab.AiAssistant,
                         ScreenTab.Products,
                         ScreenTab.Inventory,
                         ScreenTab.Sales,
@@ -279,6 +283,15 @@ fun MainApp(
                                     }
                                 }
 
+                                // AI Assistant quick button
+                                IconButton(onClick = { currentTab = ScreenTab.AiAssistant }) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "AI Deals Assistant",
+                                        tint = PosAccent
+                                    )
+                                }
+
                                 // User menu dropdown
                                 Box {
                                     IconButton(onClick = { showUserMenu = true }) {
@@ -346,8 +359,8 @@ fun MainApp(
                         val primaryTabs = listOf(
                             ScreenTab.Dashboard,
                             ScreenTab.Pos,
+                            ScreenTab.AiAssistant,
                             ScreenTab.Products,
-                            ScreenTab.Inventory,
                             ScreenTab.Sales
                         )
 
@@ -397,7 +410,12 @@ fun MainApp(
                         )
                         ScreenTab.Pos -> PosScreen(
                             viewModel = viewModel,
-                            onProceedToPayment = { currentScreen = "payment" }
+                            onProceedToPayment = { currentScreen = "payment" },
+                            onOpenAiAssistant = { currentTab = ScreenTab.AiAssistant }
+                        )
+                        ScreenTab.AiAssistant -> AiAssistantScreen(
+                            viewModel = viewModel,
+                            onNavigateToRegister = { currentTab = ScreenTab.Pos }
                         )
                         ScreenTab.Products -> ProductsScreen(viewModel = viewModel)
                         ScreenTab.Inventory -> InventoryScreen(viewModel = viewModel)

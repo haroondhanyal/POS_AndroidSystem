@@ -3,6 +3,7 @@ package com.example.data.repository
 import com.example.R
 import com.example.data.dao.PosDao
 import com.example.data.model.AuditLogEntity
+import com.example.data.model.BundleDealEntity
 import com.example.data.model.CustomerEntity
 import com.example.data.model.NotificationEntity
 import com.example.data.model.ProductEntity
@@ -63,6 +64,75 @@ class PosRepository(private val posDao: PosDao) {
     val allAuditLogs: Flow<List<AuditLogEntity>> = posDao.getAllAuditLogsFlow()
     val allNotifications: Flow<List<NotificationEntity>> = posDao.getAllNotificationsFlow()
     val unreadNotificationsCount: Flow<Int> = posDao.getUnreadNotificationCountFlow()
+    val allBundleDeals: Flow<List<BundleDealEntity>> = posDao.getAllBundleDealsFlow()
+
+    suspend fun getActiveBundleDeals(): List<BundleDealEntity> = withContext(Dispatchers.IO) {
+        val deals = posDao.getActiveBundleDeals()
+        if (deals.isEmpty()) {
+            val defaults = listOf(
+                BundleDealEntity(
+                    title = "Morning Coffee & Dark Chocolate Combo",
+                    description = "Fresh artisanal roast coffee paired with gourmet dark almond chocolate bar.",
+                    category = "Combos",
+                    originalPrice = 19.49,
+                    bundlePrice = 15.50,
+                    discountPercent = 20.0,
+                    productSkus = "8901234001,8901234004",
+                    badge = "HOT COMBO",
+                    pitchLine = "Save 20% by pairing single-origin artisanal roast coffee with rich dark almond chocolate."
+                ),
+                BundleDealEntity(
+                    title = "Zen Wellness Pack (Matcha + Essential Oil)",
+                    description = "Ceremonial grade Matcha green tea paired with soothing pure lavender essential oil.",
+                    category = "Health & Wellness",
+                    originalPrice = 30.49,
+                    bundlePrice = 24.99,
+                    discountPercent = 18.0,
+                    productSkus = "8901234003,8901234007",
+                    badge = "WELLNESS SPECIAL",
+                    pitchLine = "Perfect gift or stress-relief combo with $5.50 instant promotional discount."
+                ),
+                BundleDealEntity(
+                    title = "Tech & Commuter Audio Bundle",
+                    description = "Active noise-cancelling wireless studio headphones with heavy organic canvas tote.",
+                    category = "Electronics",
+                    originalPrice = 111.99,
+                    bundlePrice = 94.99,
+                    discountPercent = 15.0,
+                    productSkus = "8901234002,8901234005",
+                    badge = "SAVE $17",
+                    pitchLine = "Buy the premium studio headphones and get the organic canvas tote bag at discount."
+                ),
+                BundleDealEntity(
+                    title = "Quick Protein & Energy Snack Combo",
+                    description = "High protein authentic Greek yogurt paired with dark chocolate almond bar.",
+                    category = "Snacks",
+                    originalPrice = 7.29,
+                    bundlePrice = 5.49,
+                    discountPercent = 25.0,
+                    productSkus = "8901234010,8901234004",
+                    badge = "QUICK BITE",
+                    pitchLine = "Great healthy snack pairing for quick on-the-go fuel with 25% discount."
+                )
+            )
+            posDao.insertBundleDeals(defaults)
+            defaults
+        } else {
+            deals
+        }
+    }
+
+    suspend fun saveBundleDeal(deal: BundleDealEntity) = withContext(Dispatchers.IO) {
+        if (deal.id == 0L) {
+            posDao.insertBundleDeal(deal)
+        } else {
+            posDao.updateBundleDeal(deal)
+        }
+    }
+
+    suspend fun deleteBundleDeal(deal: BundleDealEntity) = withContext(Dispatchers.IO) {
+        posDao.deleteBundleDeal(deal)
+    }
 
     suspend fun seedInitialDataIfEmpty() = withContext(Dispatchers.IO) {
         val users = allUsers.first()

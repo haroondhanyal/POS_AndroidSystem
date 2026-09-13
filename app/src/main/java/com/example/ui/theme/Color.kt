@@ -92,6 +92,7 @@ val PosWarning = Color(0xFFF59E0B)
 val PosWarningContainer = Color(0xFFFEF3C7)
 val PosError = Color(0xFFEF4444)
 val PosErrorContainer = Color(0xFFFEE2E2)
+val PosAccent = Color(0xFFF59E0B)
 
 // Legacy aliases to prevent compile errors
 val PosPrimary = PosLightPrimary

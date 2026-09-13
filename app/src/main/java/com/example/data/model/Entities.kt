@@ -177,3 +177,28 @@ data class NotificationEntity(
     val isRead: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "bundle_deals")
+data class BundleDealEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val description: String,
+    val category: String,
+    val originalPrice: Double,
+    val bundlePrice: Double,
+    val discountPercent: Double,
+    val productSkus: String, // Comma-separated SKUs e.g. "COF-001,CRO-002"
+    val badge: String = "HOT DEAL",
+    val pitchLine: String = "",
+    val isActive: Boolean = true
+)
+
+data class ChatMessage(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val isUser: Boolean,
+    val text: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val bundleDeals: List<BundleDealEntity> = emptyList(),
+    val discountedProducts: List<ProductEntity> = emptyList()
+)
+

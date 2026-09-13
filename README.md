@@ -49,7 +49,15 @@ A modern, production-ready, native Android Point of Sale (POS) application built
 - **Sales Analytics**: Historical trends, category-wise revenue breakdowns, top-selling products, and payment mode distribution.
 - **Export & Print**: Easily review sales summaries for daily closing (Z-reports).
 
-### 🔒 8. Security, Roles & Audit Logging
+### 🤖 8. AI Chatbot Assistant & Bundle Deals Finder ✨
+- **Conversational Deals Discovery**: Cashiers and store managers can ask the AI in English, Urdu, or Roman Urdu (e.g., *"Koi new offer ya bundle deal chal rahi hai?"*, *"What deals are on coffee?"*, *"Show clearance deals"*).
+- **Automated Promotional Bundles**: Built-in bundle deals (e.g., Morning Coffee & Dark Chocolate Combo, Zen Wellness Pack, Tech & Commuter Bundle, Protein Snack Combo) with discounted pricing and persuasive sales pitch suggestions.
+- **1-Click Cart Addition**: Cashiers can tap **"Add Bundle to Cart"** directly on any AI recommendation card to instantly load the discounted bundle into the POS register.
+- **Dual-Mode AI Engine**:
+  - Direct Gemini 2.5 Flash cloud API integration via Generative Language API.
+  - Smart Offline AI Engine that analyzes live Room database catalog, active promotions, and nearing-expiry inventory with zero latency and zero failure.
+
+### 🔒 9. Security, Roles & Audit Logging
 - **Role-Based Access Control (RBAC)**:
   - **Cashier**: Sales register, receipt reprint, hold carts.
   - **Manager**: Products, inventory adjustments, purchase orders, customer credits.
