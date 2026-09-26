@@ -23,11 +23,7 @@
           "image": "./assets/retail-pos-splash.png",
           "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#1D4ED8",
-          "dark": {
-            "image": "./assets/retail-pos-splash.png",
-            "backgroundColor": "#0B0F19"
-          }
+          "backgroundColor": "#FFFFFF"
         }
       ]
     ],
