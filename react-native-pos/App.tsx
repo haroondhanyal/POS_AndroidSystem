@@ -12,7 +12,8 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import NetInfo from '@react-native-community/netinfo';
 import * as Crypto from 'expo-crypto';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import DateTimePicker from '@expo/ui/community/datetime-picker';
+import { Directory, File, Paths } from 'expo-file-system';
 import CountryPicker, { CountryCode as CountryISO } from 'react-native-country-picker-modal';
 import { Audit, CartLine, categories, deals, fmtDate, initialStore, money, Movement, Notice, Person, Product, Purchase, Role, Sale, SaleLine, Store, PresenceSession, SyncEvent, PasswordResetRequest } from './src/model';
 
@@ -37,6 +38,18 @@ const moneyRound = (n: number) => Number(n.toFixed(2));
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const daysUntil = (date?: string) => date ? Math.ceil((new Date(`${date}T23:59:59`).getTime() - Date.now()) / 86_400_000) : Infinity;
 const divider = (color: string) => ({ height: StyleSheet.hairlineWidth, backgroundColor: color });
+const imageLimit = 20 * 1024 * 1024;
+const persistPhoto = async (asset: ImagePicker.ImagePickerAsset): Promise<string | null> => {
+  const source = new File(asset.uri);
+  const size = asset.fileSize ?? source.size ?? 0;
+  if (size > imageLimit) { Alert.alert('Photo is too large', 'Choose a profile photo under 20 MB.'); return null; }
+  const folder = new Directory(Paths.document, 'pos-profile-photos');
+  if (!folder.exists) folder.create({ intermediates: true, idempotent: true });
+  const extension = asset.mimeType?.includes('png') ? 'png' : asset.mimeType?.includes('webp') ? 'webp' : 'jpg';
+  const destination = new File(folder, `${uid()}.${extension}`);
+  await source.copy(destination);
+  return destination.uri;
+};
 
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore);
@@ -63,7 +76,7 @@ export default function App() {
     { user: false, text: '👋 Assalam-o-alaikum! Main aapka POS offers assistant hoon. Deals, discounts, ya clearance ke baare mein poochiye.' },
   ]);
   const [loginName, setLoginName] = useState('admin');
-  const [loginPin, setLoginPin] = useState('1234');
+  const [loginPin, setLoginPin] = useState('RetailPOS!01AD9DBF95');
   const [loginRole, setLoginRole] = useState<Role>('ADMIN');
   const [loginMode, setLoginMode] = useState<'password' | 'pin'>('password');
   const [securityPin, setSecurityPin] = useState('');
@@ -92,19 +105,27 @@ export default function App() {
   }, [darkMode]);
 
   useEffect(() => {
-    AsyncStorage.getItem('retail-pos-react-native-v1').then(value => {
-      if (value) {
-        const saved = JSON.parse(value) as Partial<Store>;
-        const hydrated = { ...initialStore, ...saved,
-          presenceSessions: saved.presenceSessions || [], syncQueue: saved.syncQueue || [],
-          passwordResetRequests: saved.passwordResetRequests || [],
-        };
-        const now = new Date().toISOString();
-        hydrated.presenceSessions = hydrated.presenceSessions.map(session => session.endedAt ? session : ({ ...session, endedAt: now, lastSeenAt: now }));
-        setStore(hydrated);
+    (async () => {
+      const value = await AsyncStorage.getItem('retail-pos-react-native-v1');
+      const saved = value ? JSON.parse(value) as Partial<Store> : {};
+      const hydrated: Store = { ...initialStore, ...saved,
+        presenceSessions: saved.presenceSessions || [], syncQueue: saved.syncQueue || [],
+        passwordResetRequests: saved.passwordResetRequests || [],
+      };
+      const migrationKey = 'retail-pos-admin-credential-reset-20260927';
+      if (!await AsyncStorage.getItem(migrationKey)) {
+        hydrated.users = hydrated.users.map(person => person.id === 'u1' ? { ...person,
+          username: 'admin', email: 'admin', pin: undefined,
+          passwordSalt: '89b2643e37a8bebadc167341a56af160', passwordHash: '0adc89afcac5326495b4decd7b7f909e260b7b2fdf96e66bcbc0e3106af9f515',
+          pinSalt: '27f25b946a76bec5cd5481268eb92d82', pinHash: '9568cdda7e9ba797465809e7bb104eb0da3b39c66cfc33b94060456958cbca31',
+        } : person);
+        await AsyncStorage.setItem(migrationKey, 'complete');
       }
+      const now = new Date().toISOString();
+      hydrated.presenceSessions = hydrated.presenceSessions.map(session => session.endedAt ? session : ({ ...session, endedAt: now, lastSeenAt: now }));
+      setStore(hydrated);
       setLoaded(true);
-    }).catch(() => setLoaded(true));
+    })().catch(() => setLoaded(true));
   }, []);
   useEffect(() => {
     if (loaded) AsyncStorage.setItem('retail-pos-react-native-v1', JSON.stringify(store)).catch(() => {});
@@ -162,6 +183,7 @@ export default function App() {
   const unreadCount = store.notices.filter(n => !n.read).length;
 
   const authenticate = async () => {
+    if (!loaded) { setLoginError('Store credentials are still loading. Try sign in again in a moment.'); return; }
     const found = store.users.find(person => person.active !== false &&
       person.role === loginRole && (person.username?.toLowerCase() === loginName.trim().toLowerCase() || person.email?.toLowerCase() === loginName.trim().toLowerCase()));
     const valid = found && (loginMode === 'password'
@@ -178,10 +200,11 @@ export default function App() {
   const pickSignupPhoto = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) { Alert.alert('Photo permission required','Allow access to choose your profile picture.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes:['images'], allowsEditing:true, aspect:[1,1], quality:0.65 });
-    if (!result.canceled && result.assets[0]) setSignupForm(current=>({...current,photoUri:result.assets[0].uri}));
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes:['images'], allowsEditing:true, aspect:[1,1], quality:0.55 });
+    if (!result.canceled && result.assets[0]) { const photoUri=await persistPhoto(result.assets[0]); if(photoUri)setSignupForm(current=>({...current,photoUri})); }
   };
   const createSignup = async () => {
+    if (!loaded) { Alert.alert('Please wait','Store accounts are still loading.'); return; }
     const email=signupForm.email.trim().toLowerCase(); const username=(signupForm.username.trim() || email.split('@')[0]).toLowerCase();
     if (!signupForm.name.trim() || !email.includes('@') || !signupForm.phone.trim() || !signupForm.dateOfBirth || !signupForm.photoUri) { Alert.alert('Complete your profile','Name, valid email, phone, date of birth and profile photo are required.'); return; }
     if (store.users.some(person=>person.email?.toLowerCase()===email || person.username?.toLowerCase()===username)) { Alert.alert('Account already exists','That email or username is already registered. Sign in or use forgot password.'); return; }
@@ -189,7 +212,7 @@ export default function App() {
     if (!/^\d{4,6}$/.test(signupForm.pin) || signupForm.pin!==signupForm.confirmPin) { Alert.alert('Check your PIN','Set the same 4 to 6 digit PIN in both fields.'); return; }
     const birthDate=new Date(`${signupForm.dateOfBirth}T00:00:00`);
     if (Number.isNaN(birthDate.getTime()) || birthDate.getTime()>Date.now()) { Alert.alert('Date of birth required','Choose a valid date of birth from the calendar.'); return; }
-    const allowed:Role[]=['STAFF','SALES_PERSON','CASHIER']; const role=allowed.includes(signupForm.role)?signupForm.role:'SALES_PERSON';
+    const role=roles.includes(signupForm.role)?signupForm.role:'SALES_PERSON';
     const salt=Crypto.randomUUID(); const passwordHash=await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,`${salt}:${signupForm.password}`); const pinSalt=Crypto.randomUUID(); const pinHash=await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256,`${pinSalt}:${signupForm.pin}`); const now=new Date().toISOString();
     const person:Person={id:uid(),name:signupForm.name.trim(),username,email,phone:`${signupForm.countryCode} ${signupForm.phone.trim()}`,countryCode:signupForm.countryCode,dateOfBirth:signupForm.dateOfBirth,address:'',role,active:true,totalSpent:0,photoUri:signupForm.photoUri,passwordHash,passwordSalt:salt,pinHash,pinSalt};
     const session:PresenceSession={id:uid(),userId:person.id,name:person.name,role,startedAt:now,lastTickAt:now,lastSeenAt:now,onlineSeconds:0,offlineSeconds:0};
@@ -353,8 +376,8 @@ export default function App() {
   const pickImage = async (target: 'imageUri' | 'photoUri') => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) { Alert.alert('Photo permission required', 'Allow photo library access to choose an image.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.65 });
-    if (!result.canceled && result.assets[0]) setField(target, result.assets[0].uri);
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.55 });
+    if (!result.canceled && result.assets[0]) { const photoUri=await persistPhoto(result.assets[0]); if(photoUri)setField(target,photoUri); }
   };
   const exportReceiptPdf = async (sale: Sale | null) => {
     if (!sale) return;
@@ -369,9 +392,10 @@ export default function App() {
     if (!receipt) return;
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) { Alert.alert('Photo permission required', 'Allow photo library access to attach receipt evidence.'); return; }
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.65 });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, quality: 0.55 });
     if (result.canceled || !result.assets[0]) return;
-    const photoUri = result.assets[0].uri;
+    const photoUri = await persistPhoto(result.assets[0]);
+    if (!photoUri) return;
     const updated = { ...receipt, evidence: { ...receipt.evidence, recordedBy: receipt.evidence?.recordedBy || receipt.cashier, recordedAt: receipt.evidence?.recordedAt || receipt.timestamp, stockAfter: receipt.evidence?.stockAfter || {}, photoUri } };
     setReceipt(updated); setStore(prev => ({ ...prev, sales: prev.sales.map(sale => sale.id === updated.id ? updated : sale) }));
     log('RECEIPT EVIDENCE ADDED', `${receipt.invoice} · photo attached`);
@@ -500,7 +524,7 @@ const ageFromDOB = (dob: string) => { const birth = new Date(`${dob}T00:00:00`);
 function Icon({ c, name, color, size = 19 }: { c: Record<string, string>; name: IconName; color?: string; size?: number }) { return <MaterialCommunityIcons name={name} size={size} color={color || c.muted} />; }
 function Login({ c, loginName, loginPin, setLoginName, setLoginPin, error, onLogin, dark, setDark, role, setRole, loginMode, setLoginMode, showPassword, setShowPassword, onForgot, signupOpen, setSignupOpen, signup, setSignup, onSignup, onPickSignupPhoto, showSignupCalendar, setShowSignupCalendar }: { c: Record<string,string>; loginName:string; loginPin:string; setLoginName:(x:string)=>void; setLoginPin:(x:string)=>void; error:string; onLogin:()=>void; dark:boolean; setDark:(x:boolean)=>void; role:Role; setRole:(x:Role)=>void; loginMode:'password'|'pin'; setLoginMode:(x:'password'|'pin')=>void; showPassword:boolean; setShowPassword:(x:boolean)=>void; onForgot:()=>void; signup:SignupFormData; setSignup:React.Dispatch<React.SetStateAction<SignupFormData>>; onSignup:()=>void; signupOpen:boolean; setSignupOpen:(open:boolean)=>void; onPickSignupPhoto:()=>void; showSignupCalendar:boolean; setShowSignupCalendar:(show:boolean)=>void }) {
   const sf=(key:keyof typeof signup,label:string,keyboard:'default'|'numeric'='default')=><View key={key} style={{marginTop:11}}><Text style={[s.fieldLabel,{color:c.muted}]}>{label.toUpperCase()}</Text><TextInput value={signup[key]} onChangeText={value=>setSignup(prev=>({...prev,[key]:value}))} autoCapitalize={key==='email'||key==='username'?'none':'sentences'} keyboardType={key==='email'?'email-address':keyboard==='numeric'?'phone-pad':'default'} secureTextEntry={(['password','confirmPassword','pin','confirmPin'] as string[]).includes(key)&&!showPassword} placeholder={label} placeholderTextColor={c.muted} style={[s.input,{backgroundColor:c.bg,borderColor:c.border,color:c.text}]}/></View>;
-  return <ScrollView contentContainerStyle={s.loginWrap} keyboardShouldPersistTaps="handled"><View style={s.loginTools}><Text style={[s.mini,{color:c.muted}]}>STORE TERMINAL #104</Text><Pressable onPress={()=>setDark(!dark)} style={[s.iconBtnSmall,{backgroundColor:c.surface}]}><Icon c={c} name={dark?'weather-sunny':'weather-night'}/></Pressable></View><View style={[s.brandMark,{backgroundColor:c.primary}]}><Icon c={c} name="point-of-sale" color="#fff" size={37}/></View><Text style={[s.loginTitle,{color:c.primary,fontStyle:'italic',letterSpacing:1.1}]}>Retail POS</Text><Text style={[s.subText,{color:c.muted,textAlign:'center'}]}>Sales, inventory &amp; staff — ready for your store</Text><View style={[s.localPill,{backgroundColor:'#DCFCE7'}]}><View style={[s.auditBullet,{backgroundColor:'#10B981'}]}/><Text style={{color:'#166534',fontSize:11,fontWeight:'800'}}>LOCAL STORE · OFFLINE READY</Text></View><View style={[s.loginCard,{backgroundColor:c.surface,borderColor:c.border}]}>{!signupOpen ? <><Text style={[s.sectionTitle,{color:c.text,textAlign:'center'}]}>Welcome back</Text><Text style={[s.subText,{color:c.muted,textAlign:'center',marginTop:5}]}>Sign in with your account, password or PIN.</Text><Text style={[s.fieldLabel,{color:c.muted,marginTop:20}]}>ACCOUNT</Text><TextInput autoCapitalize="none" value={loginName} onChangeText={setLoginName} placeholder="Username or email" placeholderTextColor={c.muted} style={[s.input,{backgroundColor:c.bg,borderColor:c.border,color:c.text}]}/><Text style={[s.fieldLabel,{color:c.muted,marginTop:14}]}>ROLE</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipsRow}>{roles.map(item=><Chip key={item} c={c} active={role===item} label={item} onPress={()=>setRole(item)}/>)}</ScrollView><View style={[s.segment,{backgroundColor:c.raised,marginTop:10}]}>{(['password','pin'] as const).map(mode=><Pressable key={mode} onPress={()=>setLoginMode(mode)} style={[s.segmentItem,loginMode===mode&&{backgroundColor:c.surface}]}><Text style={[s.segmentText,{color:loginMode===mode?c.primary:c.muted}]}>{mode.toUpperCase()}</Text></Pressable>)}</View><Text style={[s.fieldLabel,{color:c.muted,marginTop:10}]}>{loginMode==='pin'?'SECURITY PIN':'PASSWORD'}</Text><View style={{flexDirection:'row',alignItems:'center',gap:8}}><TextInput value={loginPin} onChangeText={setLoginPin} secureTextEntry={!showPassword} keyboardType={loginMode==='pin'?'number-pad':'default'} autoCapitalize="none" placeholder={loginMode==='pin'?'Enter PIN':'Enter password'} placeholderTextColor={c.muted} style={[s.input,{flex:1,backgroundColor:c.bg,borderColor:c.border,color:c.text}]} onSubmitEditing={onLogin}/><Pressable onPress={()=>setShowPassword(!showPassword)}><Icon c={c} name={showPassword?'eye-off-outline':'eye-outline'}/></Pressable></View>{error?<Text style={{color:c.danger,marginTop:10,fontSize:12}}>{error}</Text>:null}<Pressable onPress={onForgot} style={{alignSelf:'flex-end',marginTop:10}}><Text style={[s.link,{color:c.primary}]}>Forgot password?</Text></Pressable><Pressable onPress={onLogin} style={[s.submitButton,{backgroundColor:c.primary,marginTop:15}]}><Text style={s.submitText}>Sign in</Text><Icon c={c} name="arrow-right" color="#fff"/></Pressable><View style={[divider(c.border),{marginVertical:15}]}/><Pressable onPress={()=>setSignupOpen(true)} style={[s.secondaryButton,{borderColor:c.primary,marginTop:0}]}><Text style={[s.buttonLabel,{color:c.primary}]}>New here? Create staff account</Text></Pressable><Text style={[s.mini,{color:c.muted,textAlign:'center',marginTop:14}]}>DEMO · admin / 1234 · ADMIN</Text></> : <><View style={s.rowBetween}><Text style={[s.sectionTitle,{color:c.text}]}>Create staff account</Text><Pressable onPress={()=>setSignupOpen(false)}><Text style={[s.link,{color:c.primary}]}>Back to sign in</Text></Pressable></View><Text style={[s.subText,{color:c.muted,marginTop:5}]}>Sign up as staff, sales person or cashier. Admin can update your role.</Text>{signup.photoUri?<Image source={{uri:signup.photoUri}} style={{width:70,height:70,borderRadius:35,alignSelf:'center',marginVertical:10}}/>:null}<Pressable onPress={onPickSignupPhoto} style={[s.secondaryButton,{borderColor:c.border}]}><Text style={[s.buttonLabel,{color:c.primary}]}>{signup.photoUri?'Change profile photo':'Add profile photo (required)'}</Text></Pressable>{sf('name','Full name')}{sf('username','Username (optional)')}{sf('email','Email','default')}<View style={{flexDirection:'row',gap:8,marginTop:11,alignItems:'center'}}><CountryPicker countryCode={signup.countryISO as CountryISO} withCallingCode withFlag withEmoji withFilter withAlphaFilter withCallingCodeButton onSelect={country=>setSignup(prev=>({...prev,countryISO:country.cca2,countryCode:`+${country.callingCode[0]||'1'}`}))}/><View style={{flex:1}}>{sf('phone','Phone number','numeric')}</View></View><Text style={[s.fieldLabel,{color:c.muted,marginTop:11}]}>DATE OF BIRTH</Text><Pressable onPress={()=>setShowSignupCalendar(true)} style={[s.input,{height:46,backgroundColor:c.bg,borderColor:c.border,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}]}><Text style={{color:signup.dateOfBirth?c.text:c.muted}}>{signup.dateOfBirth||'Choose date from calendar'}</Text><Icon c={c} name='calendar-month-outline' color={c.primary}/></Pressable>{showSignupCalendar?<DateTimePicker value={signup.dateOfBirth?new Date(`${signup.dateOfBirth}T12:00:00`):new Date(2000,0,1)} mode='date' display={Platform.OS==='ios'?'spinner':'default'} maximumDate={new Date()} onChange={(event:DateTimePickerEvent,date?:Date)=>{if(event.type==='set'&&date)setSignup(prev=>({...prev,dateOfBirth:`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`}));if(Platform.OS!=='ios'||event.type!=='set')setShowSignupCalendar(false);}}/>:null}<Text style={[s.fieldLabel,{color:c.muted,marginTop:13}]}>STAFF ROLE</Text><View style={s.chipsRow}>{(['SALES_PERSON','CASHIER','STAFF'] as Role[]).map(item=><Chip key={item} c={c} active={signup.role===item} label={item} onPress={()=>setSignup(prev=>({...prev,role:item}))}/>)}</View>{sf('password','Password · at least 8 characters')}{sf('confirmPassword','Confirm password')}{sf('pin','Set 4–6 digit PIN','numeric')}{sf('confirmPin','Confirm PIN','numeric')}<Pressable onPress={()=>setShowPassword(!showPassword)}><Text style={[s.link,{color:c.primary,marginTop:10}]}>{showPassword?'Hide password & PIN':'Show password & PIN'}</Text></Pressable><Pressable onPress={onSignup} style={[s.submitButton,{backgroundColor:c.primary,marginTop:15}]}><Text style={s.submitText}>Sign up</Text></Pressable></>}<Text style={[s.mini,{color:c.muted,marginTop:18,textAlign:'center'}]}>Retail POS · Account data is saved on this device</Text></View></ScrollView>;
+  return <ScrollView contentContainerStyle={s.loginWrap} keyboardShouldPersistTaps="handled"><View style={s.loginTools}><Text style={[s.mini,{color:c.muted}]}>STORE TERMINAL #104</Text><Pressable onPress={()=>setDark(!dark)} style={[s.iconBtnSmall,{backgroundColor:c.surface}]}><Icon c={c} name={dark?'weather-sunny':'weather-night'}/></Pressable></View><View style={[s.brandMark,{backgroundColor:c.primary}]}><Icon c={c} name="point-of-sale" color="#fff" size={37}/></View><Text style={[s.loginTitle,{color:c.primary,fontStyle:'italic',letterSpacing:1.1}]}>Retail POS</Text><Text style={[s.subText,{color:c.muted,textAlign:'center'}]}>Sales, inventory &amp; staff — ready for your store</Text><View style={[s.localPill,{backgroundColor:'#DCFCE7'}]}><View style={[s.auditBullet,{backgroundColor:'#10B981'}]}/><Text style={{color:'#166534',fontSize:11,fontWeight:'800'}}>LOCAL STORE · OFFLINE READY</Text></View><View style={[s.loginCard,{backgroundColor:c.surface,borderColor:c.border}]}>{!signupOpen ? <><Text style={[s.sectionTitle,{color:c.text,textAlign:'center'}]}>Welcome back</Text><Text style={[s.subText,{color:c.muted,textAlign:'center',marginTop:5}]}>Sign in with your account, password or PIN.</Text><Text style={[s.fieldLabel,{color:c.muted,marginTop:20}]}>ACCOUNT</Text><TextInput autoCapitalize="none" value={loginName} onChangeText={setLoginName} placeholder="Username or email" placeholderTextColor={c.muted} style={[s.input,{backgroundColor:c.bg,borderColor:c.border,color:c.text}]}/><Text style={[s.fieldLabel,{color:c.muted,marginTop:14}]}>ROLE</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipsRow}>{roles.map(item=><Chip key={item} c={c} active={role===item} label={item} onPress={()=>setRole(item)}/>)}</ScrollView><View style={[s.segment,{backgroundColor:c.raised,marginTop:10}]}>{(['password','pin'] as const).map(mode=><Pressable key={mode} onPress={()=>setLoginMode(mode)} style={[s.segmentItem,loginMode===mode&&{backgroundColor:c.surface}]}><Text style={[s.segmentText,{color:loginMode===mode?c.primary:c.muted}]}>{mode.toUpperCase()}</Text></Pressable>)}</View><Text style={[s.fieldLabel,{color:c.muted,marginTop:10}]}>{loginMode==='pin'?'SECURITY PIN':'PASSWORD'}</Text><View style={{flexDirection:'row',alignItems:'center',gap:8}}><TextInput value={loginPin} onChangeText={setLoginPin} secureTextEntry={!showPassword} keyboardType={loginMode==='pin'?'number-pad':'default'} autoCapitalize="none" placeholder={loginMode==='pin'?'Enter PIN':'Enter password'} placeholderTextColor={c.muted} style={[s.input,{flex:1,backgroundColor:c.bg,borderColor:c.border,color:c.text}]} onSubmitEditing={onLogin}/><Pressable onPress={()=>setShowPassword(!showPassword)}><Icon c={c} name={showPassword?'eye-off-outline':'eye-outline'}/></Pressable></View>{error?<Text style={{color:c.danger,marginTop:10,fontSize:12}}>{error}</Text>:null}<Pressable onPress={onForgot} style={{alignSelf:'flex-end',marginTop:10}}><Text style={[s.link,{color:c.primary}]}>Forgot password?</Text></Pressable><Pressable onPress={onLogin} style={[s.submitButton,{backgroundColor:c.primary,marginTop:15}]}><Text style={s.submitText}>Sign in</Text><Icon c={c} name="arrow-right" color="#fff"/></Pressable><View style={[divider(c.border),{marginVertical:15}]}/><Pressable onPress={()=>setSignupOpen(true)} style={[s.secondaryButton,{borderColor:c.primary,marginTop:0}]}><Text style={[s.buttonLabel,{color:c.primary}]}>New here? Create staff account</Text></Pressable><Text style={[s.mini,{color:c.muted,textAlign:'center',marginTop:14}]}>ADMIN RESET · admin / RetailPOS!01AD9DBF95 · PIN 744409</Text></> : <><View style={s.rowBetween}><Text style={[s.sectionTitle,{color:c.text}]}>Create staff account</Text><Pressable onPress={()=>setSignupOpen(false)}><Text style={[s.link,{color:c.primary}]}>Back to sign in</Text></Pressable></View><Text style={[s.subText,{color:c.muted,marginTop:5}]}>Sign up as staff, sales person or cashier. Admin can update your role.</Text>{signup.photoUri?<Image source={{uri:signup.photoUri}} style={{width:70,height:70,borderRadius:35,alignSelf:'center',marginVertical:10}}/>:null}<Pressable onPress={onPickSignupPhoto} style={[s.secondaryButton,{borderColor:c.border}]}><Text style={[s.buttonLabel,{color:c.primary}]}>{signup.photoUri?'Change profile photo':'Add profile photo (required)'}</Text></Pressable>{sf('name','Full name')}{sf('username','Username (optional)')}{sf('email','Email','default')}<View style={{flexDirection:'row',gap:8,marginTop:11,alignItems:'flex-end'}}><View><Text style={[s.fieldLabel,{color:c.muted}]}>COUNTRY</Text><CountryPicker countryCode={signup.countryISO as CountryISO} withCallingCode withFlag withEmoji withFilter withAlphaFilter withCallingCodeButton containerButtonStyle={{height:44,minWidth:94,paddingHorizontal:8,justifyContent:'center',backgroundColor:c.bg,borderColor:c.border,borderWidth:1,borderRadius:11}} onSelect={country=>setSignup(prev=>({...prev,countryISO:country.cca2,countryCode:`+${country.callingCode[0]||'1'}`}))}/></View><View style={{flex:1}}>{sf('phone','Phone number','numeric')}</View></View><Text style={[s.fieldLabel,{color:c.muted,marginTop:11}]}>DATE OF BIRTH</Text><Pressable onPress={()=>setShowSignupCalendar(true)} style={[s.input,{height:46,backgroundColor:c.bg,borderColor:c.border,flexDirection:'row',alignItems:'center',justifyContent:'space-between'}]}><Text style={{color:signup.dateOfBirth?c.text:c.muted}}>{signup.dateOfBirth||'Choose date from calendar'}</Text><Icon c={c} name='calendar-month-outline' color={c.primary}/></Pressable>{showSignupCalendar?<DateTimePicker value={signup.dateOfBirth?new Date(`${signup.dateOfBirth}T12:00:00`):new Date(2000,0,1)} mode='date' display={Platform.OS==='ios'?'inline':'default'} presentation={Platform.OS==='android'?'dialog':'inline'} maximumDate={new Date()} accentColor={c.primary} onValueChange={(_,date)=>{setSignup(prev=>({...prev,dateOfBirth:`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`}));setShowSignupCalendar(false);}} onDismiss={()=>setShowSignupCalendar(false)}/>:null}<Text style={[s.fieldLabel,{color:c.muted,marginTop:13}]}>STAFF ROLE</Text><View style={{flexDirection:'row',flexWrap:'wrap',gap:6,marginTop:6}}>{roles.map(item=><Chip key={item} c={c} active={signup.role===item} label={item.replaceAll('_',' ')} onPress={()=>setSignup(prev=>({...prev,role:item}))}/>)}</View>{sf('password','Password · at least 8 characters')}{sf('confirmPassword','Confirm password')}{sf('pin','Set 4–6 digit PIN','numeric')}{sf('confirmPin','Confirm PIN','numeric')}<Pressable onPress={()=>setShowPassword(!showPassword)}><Text style={[s.link,{color:c.primary,marginTop:10}]}>{showPassword?'Hide password & PIN':'Show password & PIN'}</Text></Pressable><Pressable onPress={onSignup} style={[s.submitButton,{backgroundColor:c.primary,marginTop:15}]}><Text style={s.submitText}>Sign up</Text></Pressable></>}<Text style={[s.mini,{color:c.muted,marginTop:18,textAlign:'center'}]}>Retail POS · Account data is saved on this device</Text></View></ScrollView>;
 }
 function Metric({ c, icon, label, value, delta, tint, onPress }: { c: Record<string, string>; icon: IconName; label: string; value: string; delta: string; tint: string; onPress?: () => void }) { return <Pressable onPress={onPress} style={[s.metricCard, { backgroundColor: c.surface, borderColor: c.border }]}><View style={[s.metricIcon, { backgroundColor: tint }]}><Icon c={c} name={icon} color={blue} size={19} /></View><Text style={[s.metricLabel, { color: c.muted }]}>{label}</Text><Text style={[s.metricValue, { color: c.text }]}>{value}</Text><Text style={[s.metricDelta, { color: c.success }]}>{delta}</Text></Pressable>; }
 function SearchBox({ c, value, onChange, placeholder, onScan }: { c: Record<string, string>; value: string; onChange: (x: string) => void; placeholder: string; onScan?: () => void }) { return <View style={[s.searchBox, { backgroundColor: c.surface, borderColor: c.border }]}><MaterialCommunityIcons name="magnify" size={19} color={c.muted} /><TextInput value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor={c.muted} style={[s.searchInput, { color: c.text }]} /><Pressable onPress={onScan} disabled={!onScan}><MaterialCommunityIcons name="barcode-scan" size={19} color={onScan ? c.primary : c.muted} /></Pressable></View>; }
