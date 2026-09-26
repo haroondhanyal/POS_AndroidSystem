@@ -14,6 +14,8 @@ Open the Expo Go app on your Android phone and scan the QR code shown by Expo. T
 
 The Expo app is implemented in TypeScript with Expo SDK 57. It can be launched independently and does not replace or modify the native Android source under `app/`.
 
+The Expo version includes a Retail POS terminal icon and the `expo-splash-screen` native launch-screen configuration. Expo Go displays the app icon while loading; verify the configured native splash in an Android app build.
+
 A modern, production-ready, native Android Point of Sale (POS) application built with **Jetpack Compose**, **Material Design 3**, and **Room Database**. Designed for retail stores, supermarkets, grocery shops, and pharmacies to streamline sales transactions, catalog control, inventory management, purchase orders, customer loyalty, and financial reporting.
 
 ---
