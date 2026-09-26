@@ -18,8 +18,9 @@ import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import CountryPicker, { CountryCode as CountryISO } from 'react-native-country-picker-modal';
 import { Audit, CartLine, categories, deals, fmtDate, initialStore, money as usdMoney, Movement, Notice, Person, Product, Purchase, Role, Sale, SaleLine, Store, PresenceSession, SyncEvent, PasswordResetRequest, ChatMessage } from './src/model';
+import { apiEndpoint, apiFetch, bytesToBase64, remoteFileUri } from './src/services/posApi';
+import { CURRENCY_KEY, STORE_KEY, saveLocalStore } from './src/services/localStore';
 
-declare const process: { env: { EXPO_PUBLIC_POS_API_URL?: string; EXPO_PUBLIC_POS_API_KEY?: string } };
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 type Module = 'Dashboard' | 'Register' | 'AI Deals' | 'Products' | 'Inventory' | 'Orders' | 'Purchases' | 'Customers' | 'Reports' | 'Staff & Audit' | 'Admin Panel' | 'My Profile' | 'Team Chat';
@@ -46,10 +47,6 @@ let usdToPkr = 278;
 const displayMoney = (amount: number) => selectedCurrency === 'PKR' ? `Rs ${new Intl.NumberFormat('en-PK',{minimumFractionDigits:2,maximumFractionDigits:2}).format(amount*usdToPkr)}` : usdMoney(amount);
 const toSelectedCurrency = (amount: number) => selectedCurrency === 'PKR' ? amount*usdToPkr : amount;
 const enteredToUsd = (amount: number) => selectedCurrency === 'PKR' ? amount / Math.max(1,usdToPkr) : amount;
-const apiEndpoint = process.env.EXPO_PUBLIC_POS_API_URL?.replace(/\/$/,'');
-const apiFetch = (route:string,init:RequestInit={}) => fetch(`${apiEndpoint}${route}`,{...init,headers:{...((init.headers||{}) as Record<string,string>),'Content-Type':'application/json','X-POS-API-Key':process.env.EXPO_PUBLIC_POS_API_KEY||'local-pos-dev-key'}});
-const bytesToBase64 = (buffer:ArrayBuffer) => { const bytes=new Uint8Array(buffer);let binary='';for(let index=0;index<bytes.length;index+=0x8000)binary+=String.fromCharCode(...bytes.subarray(index,index+0x8000));return btoa(binary); };
-const remoteFileUri = (uri?:string) => uri?.startsWith('/')&&apiEndpoint?`${apiEndpoint}${uri}`:uri;
 const persistPhoto = async (asset: ImagePicker.ImagePickerAsset): Promise<string | null> => {
   const source = new File(asset.uri);
   const size = asset.fileSize ?? source.size ?? 0;
@@ -142,13 +139,13 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const value = await AsyncStorage.getItem('retail-pos-react-native-v1');
+      const value = await AsyncStorage.getItem(STORE_KEY);
       const saved = value ? JSON.parse(value) as Partial<Store> : {};
       const hydrated: Store = { ...initialStore, ...saved,
         presenceSessions: saved.presenceSessions || [], syncQueue: saved.syncQueue || [],
         passwordResetRequests: saved.passwordResetRequests || [], messages: saved.messages || [],
       };
-      const currencySettings = await AsyncStorage.getItem('retail-pos-currency-v1');
+      const currencySettings = await AsyncStorage.getItem(CURRENCY_KEY);
       if (currencySettings) { const parsed = JSON.parse(currencySettings) as { currency?:'USD'|'PKR'; rate?:number }; if(parsed.currency)setCurrency(parsed.currency); if(parsed.rate && parsed.rate>0){setExchangeRate(parsed.rate);setExchangeRateInput(String(parsed.rate));} }
       if(apiEndpoint){try{const response=await apiFetch('/pos/users');if(response.ok){const remote=await response.json() as {users:Person[];presence:PresenceSession[]};const merged=new Map((hydrated.users||[]).map(person=>[person.id,person]));for(const person of remote.users||[]){const local=merged.get(person.id);merged.set(person.id,local?{...person,...local}:{...person,phone:person.phone||'',email:person.email||'',address:'',totalSpent:0,active:true});}hydrated.users=[...merged.values()];hydrated.presenceSessions=[...(hydrated.presenceSessions||[]),...(remote.presence||[])];}}catch{/* API is optional while the app is offline. */}}
       const migrationKey = 'retail-pos-admin-credential-reset-20260927';
@@ -167,9 +164,9 @@ export default function App() {
     })().catch(() => setLoaded(true));
   }, []);
   useEffect(() => {
-    if (loaded) AsyncStorage.setItem('retail-pos-react-native-v1', JSON.stringify(store)).catch(() => {});
+    if (loaded) saveLocalStore(store).catch(() => {});
   }, [store, loaded]);
-  useEffect(() => { if (loaded) AsyncStorage.setItem('retail-pos-currency-v1',JSON.stringify({currency,rate:exchangeRate})).catch(()=>{}); },[currency,exchangeRate,loaded]);
+  useEffect(() => { if (loaded) AsyncStorage.setItem(CURRENCY_KEY,JSON.stringify({currency,rate:exchangeRate})).catch(()=>{}); },[currency,exchangeRate,loaded]);
   useEffect(() => NetInfo.addEventListener(state => setOnline(Boolean(state.isConnected && state.isInternetReachable !== false))), []);
   useEffect(() => { const subscription=AppState.addEventListener('change',state=>setAppForeground(state==='active'));return()=>subscription.remove(); },[]);
   useEffect(() => {
@@ -392,6 +389,7 @@ export default function App() {
     return <View style={{flex:1}}><Text style={[s.subText,{color:c.muted,marginBottom:8}]}>{canBroadcast?'Chat with any team member or send an announcement to all staff.':'Message your admin or sales manager.'}</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chipsRow}>{canBroadcast?<Chip c={c} label='All staff' active={chatRecipient==='*'} onPress={()=>setChatRecipient('*')}/>:null}{teamPeers.map(person=><Chip key={person.id} c={c} label={`${person.name} · ${person.role}`} active={chatRecipient===person.id} onPress={()=>setChatRecipient(person.id)}/>)}</ScrollView><ScrollView ref={chatScrollRef} onContentSizeChange={()=>chatScrollRef.current?.scrollToEnd({animated:true})} style={[s.chatBox,{flex:1,minHeight:180,backgroundColor:c.surface,borderColor:c.border}]} contentContainerStyle={{gap:9,padding:11}} keyboardShouldPersistTaps='handled'>{thread.length?thread.map(message=><View key={message.id} style={[s.chatBubble,message.senderId===chatUser.id?{alignSelf:'flex-end',backgroundColor:c.primary}:{alignSelf:'flex-start',backgroundColor:c.bg,borderColor:c.border}]}><Text style={{color:message.senderId===chatUser.id?'#fff':c.primary,fontSize:11,fontWeight:'800'}}>{message.senderName} · {message.senderRole}</Text>{message.text?<Text style={{color:message.senderId===chatUser.id?'#fff':c.text,fontSize:14,marginTop:4}}>{message.text}</Text>:null}{message.kind==='image'&&message.uri?<Image source={{uri:message.uri}} style={{width:190,height:150,borderRadius:12,marginTop:6}} resizeMode='cover'/>:null}{message.kind==='voice'&&message.uri?<AudioMessage uri={message.uri} c={c}/>:null}{message.kind==='file'&&message.uri?<Pressable onPress={()=>Sharing.shareAsync(message.uri!)} style={{flexDirection:'row',alignItems:'center',gap:8,marginTop:8}}><Icon c={c} name='file-outline' color={message.senderId===chatUser.id?'#fff':c.primary}/><Text style={{color:message.senderId===chatUser.id?'#fff':c.text}}>{message.fileName||'Open attachment'}</Text></Pressable>:null}<Text style={{color:message.senderId===chatUser.id?'#DBEAFE':c.muted,fontSize:10,marginTop:5}}>{fmtDate(message.timestamp)}{message.recipientId==='*'?' · Announcement':''}</Text></View>):<Empty c={c} title='No messages yet' text='Messages in this thread will appear here.'/>}</ScrollView><View style={{flexDirection:'row',alignItems:'center',gap:7,paddingTop:9,paddingBottom:5}}><TextInput value={chatDraft} onChangeText={setChatDraft} placeholder='Write a message' placeholderTextColor={c.muted} multiline style={[s.input,{flex:1,minHeight:46,maxHeight:90,backgroundColor:c.surface,borderColor:c.border,color:c.text}]}/><Pressable onPress={()=>pickTeamFile(true)} style={[s.iconBtnSmall,{backgroundColor:c.surface}]}><Icon c={c} name='image-outline' color={c.primary}/></Pressable><Pressable onPress={()=>pickTeamFile(false)} style={[s.iconBtnSmall,{backgroundColor:c.surface}]}><Icon c={c} name='paperclip' color={c.primary}/></Pressable><Pressable onPress={recordVoiceMessage} style={[s.iconBtnSmall,{backgroundColor:isRecording?'#FEE2E2':c.surface}]}><Icon c={c} name={isRecording?'stop':'microphone-outline'} color={isRecording?c.danger:c.primary}/></Pressable><Pressable onPress={()=>sendTeamMessage()} style={[s.iconBtnSmall,{backgroundColor:c.primary}]}><Icon c={c} name='send' color='#fff'/></Pressable></View>{isRecording?<Text style={[s.mini,{color:c.danger,marginBottom:4}]}>Recording voice message… tap stop when done.</Text>:null}</View>;
   };
 
+  // Checkout commits the receipt, stock changes and audit evidence as one store update.
   const finishSale = () => {
     if (!cartRows.length) { Alert.alert('Cart is empty', 'Add products before checkout.'); return; }
     const paid = payment === 'CASH' ? enteredToUsd(Number(tender || toSelectedCurrency(total))) : total;
