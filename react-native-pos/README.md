@@ -67,6 +67,16 @@ react-native-pos/
 │       ├── RegisterScreen.tsx
 │       ├── ProductsScreen.tsx
 │       ├── InventoryScreen.tsx
+│       ├── OrdersScreen.tsx
+│       ├── PurchasesScreen.tsx
+│       ├── CustomersScreen.tsx
+│       ├── AIDealsScreen.tsx
+│       ├── ReportsScreen.tsx
+│       ├── AdminScreen.tsx
+│       ├── StaffScreen.tsx
+│       ├── ProfileScreen.tsx
+│       ├── TeamChatScreen.tsx
+│       ├── AuthScreen.tsx
 │       └── README.md       # Four developer workstreams and screen contracts
 ├── server/
 │   ├── server.js           # Development HTTP API
@@ -74,7 +84,7 @@ react-native-pos/
 └── assets/                 # App icon and splash artwork
 ```
 
-`App.tsx` is the coordinator for navigation, durable state, domain actions and shared sheets. Dashboard, Register, Products and Inventory are extracted components with typed props. The remaining screen content is still being moved from the coordinator; the screen ownership guide assigns separate next steps for four developers. Place independently owned screens in `src/screens/<ScreenName>.tsx`, reusable presentation in `src/components/`, and domain calculations in `src/domain/`.
+`App.tsx` is the coordinator for navigation, durable state, domain actions and shared sheets. Dashboard, Register, AI Deals, Products, Inventory, Orders, Purchases, Customers, Reports, Admin, Staff, Profile, Team Chat and Authentication are extracted components with typed props. The remaining shared checkout/form/receipt overlays stay composed at the root because they span multiple screens. Place independently owned screens in `src/screens/<ScreenName>.tsx`, reusable presentation in `src/components/`, and domain calculations in `src/domain/`.
 
 ## Requirements and setup
 

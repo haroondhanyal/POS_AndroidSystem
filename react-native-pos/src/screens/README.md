@@ -10,6 +10,16 @@ Screens are standalone React components with typed props. The app root owns pers
 | `RegisterScreen.tsx` | Customer selection, barcode/search entry, product selection and cart entry point |
 | `ProductsScreen.tsx` | Product catalog search, edit/delete and add-to-cart actions |
 | `InventoryScreen.tsx` | Stock totals, low/out-of-stock, expiry filters and stock adjustments |
+| `OrdersScreen.tsx` | Receipt history and refund hand-off |
+| `PurchasesScreen.tsx` | Purchase orders and receiving stock |
+| `CustomersScreen.tsx` | Customer/supplier directory and profile details |
+| `AIDealsScreen.tsx` | Offer suggestions and bundle actions |
+| `ReportsScreen.tsx` | Daily/weekly/monthly totals and payment/staff breakdowns |
+| `AdminScreen.tsx` | Currency/rate controls, sales summaries and online presence |
+| `StaffScreen.tsx` | Staff directory, reset requests, presence and audit history |
+| `ProfileScreen.tsx` | Signed-in profile and credential settings entry |
+| `TeamChatScreen.tsx` | Direct/group thread, attachments and voice-message UI |
+| `AuthScreen.tsx` | Sign-in, signup, password/PIN mode and signup form |
 
 These components receive typed props and do not import the app root. Shared visual primitives are temporarily passed from `App.tsx`; when the component library is extracted, move those to `src/components/` and update props without changing screen behavior.
 
@@ -17,10 +27,10 @@ These components receive typed props and do not import the app root. Shared visu
 
 | Developer | Workstream | Files to own / extract next |
 | --- | --- | --- |
-| A | Sales and checkout | `RegisterScreen.tsx`, then extract Orders/receipt and cart/checkout modal into `OrdersScreen.tsx` and `CheckoutSheet.tsx` |
-| B | Catalog and supply | `ProductsScreen.tsx`, `InventoryScreen.tsx`, then extract purchase orders into `PurchasesScreen.tsx` |
-| C | People and communication | Extract auth/signup to `AuthScreen.tsx`; staff, profile and chat to `StaffScreen.tsx`, `ProfileScreen.tsx`, `TeamChatScreen.tsx` |
-| D | Store overview and controls | `DashboardScreen.tsx`, then extract customer directory, reports and admin controls to their own files |
+| A | Sales and checkout | `RegisterScreen.tsx`, `OrdersScreen.tsx`; next extract receipt/cart checkout sheet to `CheckoutSheet.tsx` |
+| B | Catalog and supply | `ProductsScreen.tsx`, `InventoryScreen.tsx`, `PurchasesScreen.tsx` |
+| C | People and communication | `AuthScreen.tsx`, `StaffScreen.tsx`, `ProfileScreen.tsx`, `TeamChatScreen.tsx` |
+| D | Store overview and controls | `DashboardScreen.tsx`, `CustomersScreen.tsx`, `ReportsScreen.tsx`, `AdminScreen.tsx`, `AIDealsScreen.tsx` |
 
 `App.tsx` is shared integration code. Keep each developer's changes in their screen files. Coordinate edits to the root, domain model and shared styles through a single integration owner; merge one screen at a time by matching its props contract.
 
