@@ -63,14 +63,18 @@ react-native-pos/
 │   │   ├── localStore.ts   # Offline store persistence boundary
 │   │   └── posApi.ts       # Optional LAN API and media serialization boundary
 │   └── screens/
-│       └── README.md       # Screen-by-screen ownership and extraction contract
+│       ├── DashboardScreen.tsx
+│       ├── RegisterScreen.tsx
+│       ├── ProductsScreen.tsx
+│       ├── InventoryScreen.tsx
+│       └── README.md       # Four developer workstreams and screen contracts
 ├── server/
 │   ├── server.js           # Development HTTP API
 │   └── README.md           # Backend setup and endpoint notes
 └── assets/                 # App icon and splash artwork
 ```
 
-`App.tsx` still acts as the coordinator for existing screens and the shared modal layer. The screen ownership guide defines a typed-props extraction pattern so developers can move one screen at a time without coupling screen UI to persistence. Place new independently owned screens in `src/screens/<ScreenName>.tsx`, reusable presentation in `src/components/`, and domain calculations in `src/domain/`.
+`App.tsx` is the coordinator for navigation, durable state, domain actions and shared sheets. Dashboard, Register, Products and Inventory are extracted components with typed props. The remaining screen content is still being moved from the coordinator; the screen ownership guide assigns separate next steps for four developers. Place independently owned screens in `src/screens/<ScreenName>.tsx`, reusable presentation in `src/components/`, and domain calculations in `src/domain/`.
 
 ## Requirements and setup
 
