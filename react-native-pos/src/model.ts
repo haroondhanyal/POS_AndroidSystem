@@ -1,8 +1,8 @@
-export type Role = 'ADMIN' | 'MANAGER' | 'CASHIER';
+export type Role = 'ADMIN' | 'MANAGER' | 'SALES_MANAGER' | 'SALES_PERSON' | 'INVENTORY_MANAGER' | 'CASHIER' | 'STAFF';
 export type Product = {
   id: string; name: string; sku: string; category: string; brand: string;
   cost: number; price: number; tax: number; stock: number; minimum: number;
-  expiry?: string; batch: string; discount?: number;
+  expiry?: string; batch: string; discount?: number; imageUri?: string;
 };
 export type CartLine = { productId: string; quantity: number; discount: number };
 export type SaleLine = { name: string; sku: string; quantity: number; price: number };
@@ -12,11 +12,22 @@ export type Sale = {
   change: number; method: string; status: 'COMPLETED' | 'REFUNDED'; items: SaleLine[];
 };
 export type Purchase = { id: string; number: string; supplier: string; timestamp: string; total: number; status: 'RECEIVED' | 'PENDING'; items: { productId: string; quantity: number; cost: number }[] };
-export type Person = { id: string; name: string; phone: string; email: string; address: string; totalSpent: number; role?: Role; username?: string; pin?: string; active?: boolean };
+export type Person = {
+  id: string; name: string; phone: string; email: string; address: string; totalSpent: number;
+  role?: Role; username?: string; pin?: string; passwordHash?: string; passwordSalt?: string;
+  active?: boolean; photoUri?: string; countryCode?: string; dateOfBirth?: string; recoveryRequestedAt?: string;
+};
 export type Movement = { id: string; product: string; delta: number; reason: string; by: string; timestamp: string };
 export type Audit = { id: string; action: string; details: string; by: string; timestamp: string };
 export type Notice = { id: string; title: string; body: string; read: boolean; timestamp: string };
-export type Store = { products: Product[]; sales: Sale[]; purchases: Purchase[]; customers: Person[]; suppliers: Person[]; users: Person[]; movements: Movement[]; audits: Audit[]; notices: Notice[] };
+export type PresenceSession = { id: string; userId: string; name: string; role: Role; startedAt: string; endedAt?: string; lastTickAt: string; onlineSeconds: number; offlineSeconds: number; lastSeenAt: string };
+export type SyncEvent = { id: string; type: string; createdAt: string; payload: unknown };
+export type PasswordResetRequest = { id: string; userId: string; username: string; email: string; createdAt: string; completedAt?: string };
+export type Store = {
+  products: Product[]; sales: Sale[]; purchases: Purchase[]; customers: Person[]; suppliers: Person[]; users: Person[];
+  movements: Movement[]; audits: Audit[]; notices: Notice[]; presenceSessions: PresenceSession[];
+  syncQueue: SyncEvent[]; passwordResetRequests: PasswordResetRequest[];
+};
 
 export const categories = ['All', 'Beverages', 'Snacks', 'Dairy & Fresh', 'Electronics', 'Health & Wellness', 'Bakery', 'Apparel', 'Personal Care', 'Accessories'];
 export const deals = [
@@ -63,11 +74,14 @@ export const initialStore: Store = {
   ],
   users: [
     { id: 'u1', name: 'Alex Vance', phone: 'admin', email: 'admin', address: 'Store owner', role: 'ADMIN', username: 'admin', pin: '1234', active: true, totalSpent: 0 },
-    { id: 'u2', name: 'Morgan Lee', phone: 'manager', email: 'manager', address: 'Store manager', role: 'MANAGER', username: 'manager', pin: '2222', active: true, totalSpent: 0 },
-    { id: 'u3', name: 'Johnathan Rivera', phone: 'cashier1', email: 'cashier1', address: 'Cashier', role: 'CASHIER', username: 'cashier1', pin: '1111', active: true, totalSpent: 0 },
+    { id: 'u2', name: 'Morgan Lee', phone: 'manager', email: 'manager@example.com', address: 'Store manager', role: 'SALES_MANAGER', username: 'manager', pin: '2222', active: true, totalSpent: 0 },
+    { id: 'u3', name: 'Johnathan Rivera', phone: 'cashier1', email: 'johnathan@example.com', address: 'Sales team', role: 'SALES_PERSON', username: 'cashier1', pin: '1111', active: true, totalSpent: 0 },
     { id: 'u4', name: 'Sarah Jenkins', phone: 'cashier2', email: 'cashier2', address: 'Cashier', role: 'CASHIER', username: 'cashier2', pin: '3333', active: true, totalSpent: 0 },
   ],
   movements: [],
+  presenceSessions: [],
+  syncQueue: [],
+  passwordResetRequests: [],
   audits: [{ id: 'a1', action: 'SYSTEM READY', details: 'Demo store opened on Terminal #104', by: 'System', timestamp: new Date(now - 60 * 60_000).toISOString() }],
   notices: [
     { id: 'n1', title: 'Low stock: Dark Chocolate Almond Bar', body: '3 remaining · Minimum stock is 10', read: false, timestamp: new Date(now - 30 * 60_000).toISOString() },
