@@ -26,7 +26,8 @@
           "backgroundColor": "#172554"
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "expo-audio"
     ],
     "web": {
       "favicon": "./assets/favicon.png"

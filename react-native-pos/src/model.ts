@@ -24,10 +24,11 @@ export type Notice = { id: string; title: string; body: string; read: boolean; t
 export type PresenceSession = { id: string; userId: string; name: string; role: Role; startedAt: string; endedAt?: string; lastTickAt: string; onlineSeconds: number; offlineSeconds: number; lastSeenAt: string };
 export type SyncEvent = { id: string; type: string; createdAt: string; payload: unknown };
 export type PasswordResetRequest = { id: string; userId: string; username: string; email: string; createdAt: string; completedAt?: string };
+export type ChatMessage = { id: string; senderId: string; senderName: string; senderRole: Role; recipientId: string; recipientName: string; kind: 'text' | 'image' | 'file' | 'voice'; text: string; uri?: string; fileName?: string; timestamp: string };
 export type Store = {
   products: Product[]; sales: Sale[]; purchases: Purchase[]; customers: Person[]; suppliers: Person[]; users: Person[];
   movements: Movement[]; audits: Audit[]; notices: Notice[]; presenceSessions: PresenceSession[];
-  syncQueue: SyncEvent[]; passwordResetRequests: PasswordResetRequest[];
+  syncQueue: SyncEvent[]; passwordResetRequests: PasswordResetRequest[]; messages?: ChatMessage[];
 };
 
 export const categories = ['All', 'Beverages', 'Snacks', 'Dairy & Fresh', 'Electronics', 'Health & Wellness', 'Bakery', 'Apparel', 'Personal Care', 'Accessories'];
