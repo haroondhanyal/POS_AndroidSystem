@@ -1,5 +1,19 @@
 # Retail POS (Point of Sale) System for Android 📱🛒
 
+## React Native / Expo app
+
+This repository also contains a separate React Native app at [`react-native-pos/`](react-native-pos/). The original native Android app remains in `app/`; the Expo version is an independent POS implementation with dashboard, register and checkout, AI deals, products, inventory, orders, purchases, customers and suppliers, reports, and staff/audit screens. It stores demo data locally on the device.
+
+```bash
+cd react-native-pos
+npm install
+npm start
+```
+
+Open the Expo Go app on your Android phone and scan the QR code shown by Expo. To start the development server on the local network, run `npx expo start --lan`. Demo sign-in: `admin` / `1234` (manager: `manager` / `2222`; cashiers: `cashier1` / `1111` and `cashier2` / `3333`).
+
+The Expo app is implemented in TypeScript with Expo SDK 57. It can be launched independently and does not replace or modify the native Android source under `app/`.
+
 A modern, production-ready, native Android Point of Sale (POS) application built with **Jetpack Compose**, **Material Design 3**, and **Room Database**. Designed for retail stores, supermarkets, grocery shops, and pharmacies to streamline sales transactions, catalog control, inventory management, purchase orders, customer loyalty, and financial reporting.
 
 ---
