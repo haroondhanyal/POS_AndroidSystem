@@ -10,11 +10,12 @@ export type Sale = {
   id: string; invoice: string; timestamp: string; customer: string; cashier: string;
   subtotal: number; discount: number; tax: number; total: number; paid: number;
   change: number; method: string; status: 'COMPLETED' | 'REFUNDED'; items: SaleLine[];
+  evidence?: { recordedBy: string; recordedAt: string; paymentReference?: string; photoUri?: string; stockAfter: Record<string, number>; customerSnapshot?: Pick<Person, 'name' | 'phone' | 'email' | 'address' | 'photoUri'> };
 };
 export type Purchase = { id: string; number: string; supplier: string; timestamp: string; total: number; status: 'RECEIVED' | 'PENDING'; items: { productId: string; quantity: number; cost: number }[] };
 export type Person = {
   id: string; name: string; phone: string; email: string; address: string; totalSpent: number;
-  role?: Role; username?: string; pin?: string; passwordHash?: string; passwordSalt?: string;
+  role?: Role; username?: string; pin?: string; passwordHash?: string; passwordSalt?: string; pinHash?: string; pinSalt?: string;
   active?: boolean; photoUri?: string; countryCode?: string; dateOfBirth?: string; recoveryRequestedAt?: string;
 };
 export type Movement = { id: string; product: string; delta: number; reason: string; by: string; timestamp: string };

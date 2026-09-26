@@ -20,10 +20,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/retail-pos-splash.png",
+          "image": "./assets/retail-pos-splash-branded.png",
           "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#FFFFFF"
+          "backgroundColor": "#1D4ED8"
         }
       ],
       "expo-sharing"
