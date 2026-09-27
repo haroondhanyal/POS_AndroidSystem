@@ -8,6 +8,8 @@ The React Native app can use this small Node.js API for shared staff accounts, c
 2. In a terminal, run `npm run server` from this directory. The API listens on port 8090 and writes data under `server/data/`.
 3. In another terminal, run `npx expo start --lan --port 8082` and open the Expo URL on each phone. Keep the API computer and phones on the same Wi-Fi.
 
-The API has `/health` for status and stores uploaded files locally. `server/data/` is ignored by Git.
+The API has `/health` for server reachability. `POST /pos/sync` returns `acceptedIds` so the mobile outbox only removes events the server confirms (including previously accepted duplicate IDs). Sign-out events are queued as well, so closing the app while offline still ends the remote session after reconnect. `server/data/` is ignored by Git.
+
+The app's **Sync & Status** screen distinguishes device connectivity from configured server reachability and shows queued events, retry attempts and the last successful sync. Presence heartbeat now records app foreground state separately; moving the app to the background no longer ends the login session. The work-time counters cover foreground time with and without server connectivity, not background shift duration.
 
 The default API key is only for local development. It is embedded in the Expo client, so it is not a safe authentication scheme for a public or internet facing server. Use per-user server authentication and HTTPS before deploying outside a trusted development LAN.

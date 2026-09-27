@@ -20,6 +20,7 @@ Screens are standalone React components with typed props. The app root owns pers
 | `ProfileScreen.tsx` | Signed-in profile and credential settings entry |
 | `TeamChatScreen.tsx` | Direct/group thread, attachments and voice-message UI |
 | `AuthScreen.tsx` | Sign-in, signup, password/PIN mode and signup form |
+| `SyncStatusScreen.tsx` | Device/server status, sync queue errors and manual retry |
 
 These components receive typed props and do not import the app root. Shared visual primitives are temporarily passed from `App.tsx`; when the component library is extracted, move those to `src/components/` and update props without changing screen behavior.
 

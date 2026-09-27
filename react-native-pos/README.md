@@ -8,6 +8,7 @@ An Expo-based point-of-sale app for Android and iOS. It brings checkout, invento
 
 - Expo SDK 57 · React 19 · React Native 0.86 · TypeScript
 - Offline-first store state using AsyncStorage; LAN sync and presence when the API is configured
+- Separate device-network and POS-server health states, with a sync-status screen and retry queue
 - Role-aware modules for administrators, managers, sales staff, inventory staff and cashiers
 - USD/PKR display with a configurable exchange rate; values are stored in USD
 - Product photos, profile photos, barcode scanning, PDF receipts and receipt evidence
@@ -51,6 +52,7 @@ flowchart TD
 3. User actions update typed domain records in the app store. The store is saved locally, then eligible changes are sent to the optional API.
 4. A completed checkout records a sale and stock movement, updates inventory/customer totals, writes audit/receipt evidence, clears the cart and opens the receipt sheet.
 5. Product and profile media are copied into the app document directory. Chat files can be uploaded through the development server and are referenced by a server path.
+6. Device network state and POS API health are checked separately. Pending sale, stock and sign-out events remain in the local queue until the server acknowledges their IDs; failed sync batches retry with bounded exponential backoff.
 
 ### Source map
 
@@ -77,6 +79,7 @@ react-native-pos/
 │       ├── ProfileScreen.tsx
 │       ├── TeamChatScreen.tsx
 │       ├── AuthScreen.tsx
+│       ├── SyncStatusScreen.tsx
 │       └── README.md       # Four developer workstreams and screen contracts
 ├── server/
 │   ├── server.js           # Development HTTP API

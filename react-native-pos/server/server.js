@@ -42,7 +42,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (url.pathname === '/health' && req.method === 'GET') { json(res, 200, { status: 'ok', service: 'retail-pos-api' }); return; }
+  if (url.pathname === '/health' && req.method === 'GET') { json(res, 200, { status: 'ok', service: 'retail-pos-api', serverTime: new Date().toISOString() }); return; }
 
   if (url.pathname.startsWith('/pos/files/') && req.method === 'GET') {
     const name = path.basename(decodeURIComponent(url.pathname.slice('/pos/files/'.length)));
@@ -65,7 +65,8 @@ const server = http.createServer(async (req, res) => {
       Object.assign(person, { name: body.name, role: body.role, email: body.email || person.email, phone: body.phone || person.phone, active: body.active !== false, username: body.username || person.username, passwordHash: body.passwordHash || person.passwordHash, passwordSalt: body.passwordSalt || person.passwordSalt, pinHash: body.pinHash || person.pinHash, pinSalt: body.pinSalt || person.pinSalt, dateOfBirth: body.dateOfBirth || person.dateOfBirth, countryCode: body.countryCode || person.countryCode });
       let session = db.presence.find(item => item.id === body.sessionId);
       if (!session) { session = { id: body.sessionId, userId: body.userId, name: body.name, role: body.role, startedAt: now, lastSeenAt: now, endedAt: null, onlineSeconds: 0, offlineSeconds: 0 }; db.presence.push(session); }
-      session.name = body.name; session.role = body.role; session.lastSeenAt = now; session.endedAt = body.isActive === false ? now : null;
+      // App background/foreground is separate from sign-out; only explicit logout ends the session.
+      session.name = body.name; session.role = body.role; session.lastSeenAt = now; session.appForeground = body.appForeground !== false; session.endedAt = null;
       persist();
       json(res, 200, { users: db.users.filter(item => item.active !== false).map(publicUser), presence: db.presence.slice(-500) }); return;
     }
@@ -116,14 +117,21 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/pos/sync' && req.method === 'POST') {
       const body = await getBody(req); const events = Array.isArray(body.events) ? body.events : [];
+      const acceptedIds = [];
       for (const event of events) {
-        if (!event.id || db.syncEvents.some(item => item.id === event.id)) continue;
+        if (!event.id) continue;
+        if (db.syncEvents.some(item => item.id === event.id)) { acceptedIds.push(event.id); continue; }
         db.syncEvents.push(event);
         if (event.type === 'SALE_COMPLETED' && event.payload?.id && !db.sales.some(sale => sale.id === event.payload.id)) db.sales.push(event.payload);
         if (event.type === 'ACTIVITY' && event.payload?.id && !db.activity.some(item => item.id === event.payload.id)) db.activity.push(event.payload);
+        if (event.type === 'PRESENCE_OFFLINE' && event.payload?.sessionId) {
+          const session = db.presence.find(item => item.id === event.payload.sessionId);
+          if (session) { session.endedAt = event.payload.endedAt || event.createdAt; session.lastSeenAt = session.endedAt; }
+        }
+        acceptedIds.push(event.id);
       }
       if (db.syncEvents.length > 10000) db.syncEvents = db.syncEvents.slice(-10000);
-      persist(); json(res, 200, { accepted: events.length }); return;
+      persist(); json(res, 200, { accepted: acceptedIds.length, acceptedIds }); return;
     }
     if (url.pathname === '/pos/sales' && req.method === 'GET') { json(res, 200, { sales: db.sales.slice(-5000).reverse() }); return; }
     json(res, 404, { error: 'Route not found.' });

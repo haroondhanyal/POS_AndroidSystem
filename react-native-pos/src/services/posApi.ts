@@ -28,3 +28,18 @@ export const bytesToBase64 = (buffer: ArrayBuffer) => {
 
 /** Turn backend-relative attachment paths into usable device URLs. */
 export const remoteFileUri = (uri?: string) => uri?.startsWith('/') && apiEndpoint ? `${apiEndpoint}${uri}` : uri;
+
+/** Probe the configured POS server separately from device Internet connectivity. */
+export async function checkPosServer(timeoutMs = 3_500): Promise<boolean> {
+  if (!apiEndpoint) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${apiEndpoint}/health`, { method: 'GET', signal: controller.signal });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}

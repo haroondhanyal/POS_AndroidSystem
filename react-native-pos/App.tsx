@@ -18,7 +18,7 @@ import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { Directory, File, Paths } from 'expo-file-system';
 import CountryPicker, { CountryCode as CountryISO } from 'react-native-country-picker-modal';
 import { Audit, CartLine, categories, deals, fmtDate, initialStore, money as usdMoney, Movement, Notice, Person, Product, Purchase, Role, Sale, SaleLine, Store, PresenceSession, SyncEvent, PasswordResetRequest, ChatMessage } from './src/model';
-import { apiEndpoint, apiFetch, bytesToBase64, remoteFileUri } from './src/services/posApi';
+import { apiEndpoint, apiFetch, bytesToBase64, checkPosServer, remoteFileUri } from './src/services/posApi';
 import { CURRENCY_KEY, STORE_KEY, saveLocalStore } from './src/services/localStore';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { RegisterScreen } from './src/screens/RegisterScreen';
@@ -34,10 +34,11 @@ import { StaffScreen } from './src/screens/StaffScreen';
 import { AdminScreen } from './src/screens/AdminScreen';
 import { TeamChatScreen } from './src/screens/TeamChatScreen';
 import { AuthScreen, roles, SignupFormData } from './src/screens/AuthScreen';
+import { SyncStatusScreen } from './src/screens/SyncStatusScreen';
 
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-type Module = 'Dashboard' | 'Register' | 'AI Deals' | 'Products' | 'Inventory' | 'Orders' | 'Purchases' | 'Customers' | 'Reports' | 'Staff & Audit' | 'Admin Panel' | 'My Profile' | 'Team Chat';
+type Module = 'Dashboard' | 'Register' | 'AI Deals' | 'Products' | 'Inventory' | 'Orders' | 'Purchases' | 'Customers' | 'Reports' | 'Staff & Audit' | 'Admin Panel' | 'My Profile' | 'Team Chat' | 'Sync & Status';
 const modules: { name: Module; icon: IconName }[] = [
   { name: 'Dashboard', icon: 'view-dashboard-outline' }, { name: 'Register', icon: 'point-of-sale' },
   { name: 'AI Deals', icon: 'creation-outline' }, { name: 'Products', icon: 'shopping-outline' },
@@ -45,6 +46,7 @@ const modules: { name: Module; icon: IconName }[] = [
   { name: 'Purchases', icon: 'truck-delivery-outline' }, { name: 'Customers', icon: 'account-group-outline' },
   { name: 'Reports', icon: 'chart-box-outline' }, { name: 'Staff & Audit', icon: 'shield-account-outline' },
   { name: 'Admin Panel', icon: 'security' }, { name: 'My Profile', icon: 'account-circle-outline' }, { name: 'Team Chat', icon: 'message-text-outline' },
+  { name: 'Sync & Status', icon: 'cloud-sync-outline' },
 ];
 const blue = '#1D4ED8';
 const green = '#0F766E';
@@ -114,7 +116,12 @@ export default function App() {
   const [securityPasswordConfirm, setSecurityPasswordConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
-  const [online, setOnline] = useState(false);
+  const [networkConnected, setNetworkConnected] = useState(false);
+  const [internetReachability, setInternetReachability] = useState<boolean | null>(null);
+  const [serverReachable, setServerReachable] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | undefined>();
+  const [syncTick, setSyncTick] = useState(0);
   const [appForeground, setAppForeground] = useState(true);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [reportRange, setReportRange] = useState<'Daily' | 'Weekly' | 'Monthly'>('Daily');
@@ -131,7 +138,7 @@ export default function App() {
   const darkMode = dark;
   selectedCurrency = currency; usdToPkr = exchangeRate;
   const syncChatMessage = async (message:ChatMessage) => {
-    if(!apiEndpoint||!online||message.syncedAt||pendingChatSends.current.has(message.id))return;
+    if(!apiEndpoint||!serverReachable||message.syncedAt||pendingChatSends.current.has(message.id))return;
     pendingChatSends.current.add(message.id);
     try{
       const outgoing:ChatMessage&{attachmentBase64?:string}={...message};
@@ -179,8 +186,21 @@ export default function App() {
     if (loaded) saveLocalStore(store).catch(() => {});
   }, [store, loaded]);
   useEffect(() => { if (loaded) AsyncStorage.setItem(CURRENCY_KEY,JSON.stringify({currency,rate:exchangeRate})).catch(()=>{}); },[currency,exchangeRate,loaded]);
-  useEffect(() => NetInfo.addEventListener(state => setOnline(Boolean(state.isConnected && state.isInternetReachable !== false))), []);
+  useEffect(() => NetInfo.addEventListener(state => {
+    const hasNetwork = state.isConnected === true;
+    setNetworkConnected(hasNetwork);
+    setInternetReachability(state.isInternetReachable);
+  }), []);
   useEffect(() => { const subscription=AppState.addEventListener('change',state=>setAppForeground(state==='active'));return()=>subscription.remove(); },[]);
+  // A network link does not guarantee that this store's configured POS server is reachable.
+  useEffect(() => {
+    if (!networkConnected || !apiEndpoint) { setServerReachable(false); return; }
+    let cancelled = false;
+    const probe = async () => { const reachable = await checkPosServer(); if (!cancelled) setServerReachable(reachable); };
+    probe();
+    const timer = setInterval(probe, 15_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [networkConnected, apiEndpoint]);
   useEffect(() => {
     if (!sessionId) return;
     const interval = setInterval(() => {
@@ -189,31 +209,60 @@ export default function App() {
         if (session.id !== sessionId || session.endedAt) return session;
         const seconds = Math.max(0, Math.floor((tick - new Date(session.lastTickAt).getTime()) / 1000));
         const now = new Date(tick).toISOString();
-        return { ...session, lastTickAt: now, lastSeenAt: appForeground ? now : session.lastSeenAt,
-          onlineSeconds: session.onlineSeconds + (appForeground ? seconds : 0),
-          offlineSeconds: session.offlineSeconds + (appForeground ? 0 : seconds) };
+        // Count active foreground work as connected/offline only; background time is not work time.
+        return { ...session, lastTickAt: now, lastSeenAt: serverReachable && appForeground ? now : session.lastSeenAt,
+          onlineSeconds: session.onlineSeconds + (appForeground && serverReachable ? seconds : 0),
+          offlineSeconds: session.offlineSeconds + (appForeground && !serverReachable ? seconds : 0) };
       }) }));
     }, 10_000);
     return () => clearInterval(interval);
-  }, [sessionId, appForeground]);
+  }, [sessionId, appForeground, serverReachable]);
+  const retryMetadata = (event: SyncEvent, message: string): SyncEvent => {
+    const attempts = (event.attempts || 0) + 1;
+    const delay = Math.min(5 * 60_000, 2_000 * 2 ** Math.min(attempts - 1, 8));
+    return { ...event, attempts, nextAttemptAt: Date.now() + delay, lastError: message };
+  };
   useEffect(() => {
-    const endpoint = process.env.EXPO_PUBLIC_POS_API_URL?.replace(/\/$/, '');
-    if (!online || !endpoint || !loaded || !store.syncQueue.length || syncInFlight.current) return;
+    if (!serverReachable || !loaded || !store.syncQueue.length || syncInFlight.current) return;
+    const now = Date.now();
+    const batch = store.syncQueue.filter(event => !event.nextAttemptAt || event.nextAttemptAt <= now);
+    if (!batch.length) {
+      const nextAttempt = Math.min(...store.syncQueue.map(event => event.nextAttemptAt || now));
+      const timer = setTimeout(() => setSyncTick(value => value + 1), Math.max(250, nextAttempt - now));
+      return () => clearTimeout(timer);
+    }
     syncInFlight.current = true;
-    const batch = store.syncQueue;
+    setSyncing(true);
     apiFetch('/pos/sync', { method: 'POST', body: JSON.stringify({ events: batch }) })
-      .then(response => { if (!response.ok) throw new Error('Sync endpoint rejected the queue.'); return response.json().catch(() => ({})); })
-      .then(() => { const ids = new Set(batch.map(event => event.id)); setStore(prev => ({ ...prev, syncQueue: prev.syncQueue.filter(event => !ids.has(event.id)) })); })
-      .catch(() => {})
-      .finally(() => { syncInFlight.current = false; });
-  }, [online, loaded, store.syncQueue]);
+      .then(async response => { if (!response.ok) throw new Error('Sync endpoint rejected the queue.'); return await response.json() as { acceptedIds?: string[] }; })
+      .then(result => {
+        const acknowledged = new Set(result.acceptedIds || []);
+        if (!acknowledged.size) throw new Error('Server did not acknowledge any queued event IDs.');
+        const sentIds = new Set(batch.map(event => event.id));
+        setStore(prev => ({ ...prev, syncQueue: prev.syncQueue.flatMap(event => {
+          if (acknowledged.has(event.id)) return [];
+          if (sentIds.has(event.id)) return [retryMetadata(event, 'Server did not acknowledge this event ID.')];
+          return [event];
+        }) }));
+        setLastSyncedAt(new Date().toISOString());
+      })
+      .catch(error => {
+        const failedIds = new Set(batch.map(event => event.id));
+        const message = error instanceof Error ? error.message : 'Unable to sync with the POS server.';
+        setStore(prev => ({ ...prev, syncQueue: prev.syncQueue.map(event => {
+          if (!failedIds.has(event.id)) return event;
+          return retryMetadata(event, message);
+        }) }));
+      })
+      .finally(() => { syncInFlight.current = false; setSyncing(false); setSyncTick(value => value + 1); });
+  }, [serverReachable, loaded, store.syncQueue, syncTick]);
 
   useEffect(()=>{
-    if(!apiEndpoint||!online||!loaded||!user||!sessionId)return;
+    if(!apiEndpoint||!serverReachable||!loaded||!user||!sessionId)return;
     let stopped=false;
     const syncTeam=async()=>{
       try{
-        const heartbeat=await apiFetch('/pos/users/heartbeat',{method:'POST',body:JSON.stringify({userId:user.id,name:user.name,role:user.role||'STAFF',email:user.email,phone:user.phone,username:user.username,passwordHash:user.passwordHash,passwordSalt:user.passwordSalt,pinHash:user.pinHash,pinSalt:user.pinSalt,dateOfBirth:user.dateOfBirth,countryCode:user.countryCode,sessionId,isActive:appForeground})});
+        const heartbeat=await apiFetch('/pos/users/heartbeat',{method:'POST',body:JSON.stringify({userId:user.id,name:user.name,role:user.role||'STAFF',email:user.email,phone:user.phone,username:user.username,passwordHash:user.passwordHash,passwordSalt:user.passwordSalt,pinHash:user.pinHash,pinSalt:user.pinSalt,dateOfBirth:user.dateOfBirth,countryCode:user.countryCode,sessionId,isActive:true,appForeground})});
         if(!heartbeat.ok)return;
         const team=await heartbeat.json() as {users:Person[];presence:PresenceSession[]};
         const [messageResponse,salesResponse,activityResponse]=await Promise.all([apiFetch(`/pos/chat/messages?userId=${encodeURIComponent(user.id)}`),apiFetch('/pos/sales'),apiFetch('/pos/activity')]);
@@ -234,15 +283,15 @@ export default function App() {
       }catch{/* Server is unreachable; the local store keeps working and will retry. */}
     };
     syncTeam();const timer=setInterval(syncTeam,8000);return()=>{stopped=true;clearInterval(timer);};
-  },[apiEndpoint,online,loaded,user,sessionId,appForeground]);
+  },[apiEndpoint,serverReachable,loaded,user,sessionId,appForeground]);
 
-  useEffect(()=>{if(online&&loaded&&apiEndpoint)apiFetch('/pos/users/sync',{method:'POST',body:JSON.stringify({users:store.users})}).catch(()=>{});},[online,loaded,store.users]);
-    useEffect(()=>{if(!online||!apiEndpoint)return;for(const message of store.messages||[])syncChatMessage(message);},[online,store.messages]);
+  useEffect(()=>{if(serverReachable&&loaded&&apiEndpoint)apiFetch('/pos/users/sync',{method:'POST',body:JSON.stringify({users:store.users})}).catch(()=>{});},[serverReachable,loaded,store.users]);
+    useEffect(()=>{if(!serverReachable||!apiEndpoint)return;for(const message of store.messages||[])syncChatMessage(message);},[serverReachable,store.messages]);
 
   const log = (action: string, details: string, by = user?.name || 'System') => {
     const event: Audit = { id: uid(), action, details, by, timestamp: new Date().toISOString() };
     setStore(prev => ({ ...prev, audits: [event, ...prev.audits] }));
-    if(apiEndpoint&&online)apiFetch('/pos/activity',{method:'POST',body:JSON.stringify(event)}).catch(()=>{});
+    if(apiEndpoint&&serverReachable)apiFetch('/pos/activity',{method:'POST',body:JSON.stringify(event)}).catch(()=>{});
   };
   const updateProduct = (id: string, patch: Partial<Product>) => setStore(prev => ({ ...prev, products: prev.products.map(p => p.id === id ? { ...p, ...patch } : p) }));
   const addLine = (product: Product, discount = product.discount || 0) => {
@@ -283,10 +332,10 @@ export default function App() {
       : (found.pinHash && found.pinSalt ? await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${found.pinSalt}:${loginPin}`) === found.pinHash : found.pin === loginPin));
     if (!found || !valid) { setLoginError('Login details or selected role do not match.'); return; }
     const now = new Date().toISOString();
-    const session: PresenceSession = { id: uid(), userId: found.id, name: found.name, role: found.role || 'STAFF', startedAt: now, lastTickAt: now, lastSeenAt: now, onlineSeconds: online ? 0 : 0, offlineSeconds: 0 };
+    const session: PresenceSession = { id: uid(), userId: found.id, name: found.name, role: found.role || 'STAFF', startedAt: now, lastTickAt: now, lastSeenAt: now, onlineSeconds: 0, offlineSeconds: 0 };
     setSessionId(session.id);
     setStore(prev => ({ ...prev, presenceSessions: [session, ...prev.presenceSessions] }));
-    setUser(found); setChatRecipient(found.role==='ADMIN'?(store.users.find(person=>person.id!==found.id)?.id||'*'):'u1'); setLoginError(''); setTab('Dashboard'); log('LOGIN', `${found.name} signed in · ${online ? 'online' : 'offline'}`, found.name);
+    setUser(found); setChatRecipient(found.role==='ADMIN'?(store.users.find(person=>person.id!==found.id)?.id||'*'):'u1'); setLoginError(''); setTab('Dashboard'); log('LOGIN', `${found.name} signed in · ${serverReachable ? 'POS server connected' : 'local/offline'}`, found.name);
     if (!found.pinHash) setModal('security');
   };
   const pickSignupPhoto = async () => {
@@ -323,12 +372,13 @@ export default function App() {
   };
   const goLogout = () => {
     if (user) {
-      if(apiEndpoint&&online&&sessionId)apiFetch('/pos/presence/offline',{method:'POST',body:JSON.stringify({sessionId})}).catch(()=>{});
       const now = new Date().toISOString();
-      setStore(prev => ({ ...prev, presenceSessions: prev.presenceSessions.map(session => {
+      const offlineEvent: SyncEvent | null = apiEndpoint && sessionId ? { id: uid(), type: 'PRESENCE_OFFLINE', createdAt: now, payload: { sessionId, endedAt: now } } : null;
+      // Queue logout too, so the server closes the session even when sign-out happens offline.
+      setStore(prev => ({ ...prev, syncQueue: offlineEvent ? [...prev.syncQueue, offlineEvent] : prev.syncQueue, presenceSessions: prev.presenceSessions.map(session => {
         if (session.id !== sessionId || session.endedAt) return session;
         const seconds = Math.max(0, Math.floor((Date.now() - new Date(session.lastTickAt).getTime()) / 1000));
-        return { ...session, endedAt: now, lastSeenAt: now, onlineSeconds: session.onlineSeconds + (online ? seconds : 0), offlineSeconds: session.offlineSeconds + (online ? 0 : seconds) };
+        return { ...session, endedAt: now, lastSeenAt: now, onlineSeconds: session.onlineSeconds + (serverReachable ? seconds : 0), offlineSeconds: session.offlineSeconds + (serverReachable ? 0 : seconds) };
       }) }));
       log('LOGOUT', `${user.name} signed out`, user.name);
     }
@@ -559,14 +609,15 @@ export default function App() {
 
 
 
+  const retrySyncNow = () => { setStore(prev => ({ ...prev, syncQueue: prev.syncQueue.map(event => ({ ...event, nextAttemptAt: undefined, lastError: undefined })) })); setSyncTick(value => value + 1); };
   const openSecuritySettings = () => { setSecurityPin(''); setSecurityPinConfirm(''); setSecurityPassword(''); setSecurityPasswordConfirm(''); setModal('security'); };
-  const content = tab === 'Dashboard' ? <DashboardScreen c={c} s={s} user={user} store={store} unread={unread} todayRevenue={todayRevenue} todayCount={todayCount} todaySales={todaySales} lowStock={lowStock} Icon={Icon} Metric={Metric} SaleRow={SaleRow} ProductRow={ProductRow} displayMoney={displayMoney} blue={blue} setTab={setTab} setModal={setModal} setInventoryFilter={setInventoryFilter} showForm={showForm} stockAdjust={stockAdjust} /> : tab === 'Register' ? <RegisterScreen c={c} s={s} blue={blue} store={store} customer={customer} setCustomer={setCustomer} search={search} setSearch={setSearch} cameraPermission={cameraPermission} requestCameraPermission={requestCameraPermission} setBarcodeScanned={setBarcodeScanned} setModal={setModal} category={category} setCategory={setCategory} cart={cart} addLine={addLine} filteredProducts={filteredProducts} displayMoney={displayMoney} Icon={Icon} SearchBox={SearchBox} Chip={Chip} /> : tab === 'AI Deals' ? <AIDealsScreen c={c} s={s} messages={messages} Icon={Icon} Chip={Chip} displayMoney={displayMoney} sendMessage={sendMessage} addToCartFromDeal={addToCartFromDeal} /> : tab === 'Products' ? <ProductsScreen c={c} s={s} store={store} search={search} setSearch={setSearch} category={category} setCategory={setCategory} filteredProducts={filteredProducts} Icon={Icon} SearchBox={SearchBox} Chip={Chip} ProductRow={ProductRow} displayMoney={displayMoney} addLine={addLine} showForm={showForm} removeProduct={removeProduct} /> : tab === 'Inventory' ? <InventoryScreen c={c} s={s} store={store} lowStock={lowStock} inventoryFilter={inventoryFilter} setInventoryFilter={setInventoryFilter} Icon={Icon} Chip={Chip} ProductRow={ProductRow} Empty={Empty} stockAdjust={stockAdjust} /> : tab === 'Orders' ? <OrdersScreen c={c} s={s} user={user} sales={store.sales} canViewMyReports={canViewMyReports} Icon={Icon} SaleRow={SaleRow} displayMoney={displayMoney} refundSale={refundSale} /> : tab === 'Purchases' ? <PurchasesScreen c={c} s={s} store={store} Icon={Icon} Badge={Badge} displayMoney={displayMoney} showForm={showForm} receivePurchase={receivePurchase} /> : tab === 'Customers' ? <CustomersScreen c={c} s={s} store={store} peopleTab={peopleTab} setPeopleTab={setPeopleTab} showForm={showForm} Icon={Icon} displayMoney={displayMoney} ageFromDOB={ageFromDOB} blue={blue} green={green} /> : tab === 'Reports' ? <ReportsScreen c={c} s={s} store={store} user={user} canViewMyReports={canViewMyReports} reportRange={reportRange} setReportRange={setReportRange} Chip={Chip} Metric={Metric} ProgressLine={ProgressLine} ProductRow={ProductRow} displayMoney={displayMoney} green={green} amber={amber} /> : tab === 'Team Chat' ? <TeamChatScreen c={c} s={s} user={user} store={store} chatRecipient={chatRecipient} setChatRecipient={setChatRecipient} currentPeer={currentPeer} teamPeers={teamPeers} chatScrollRef={chatScrollRef} chatDraft={chatDraft} setChatDraft={setChatDraft} pickTeamFile={pickTeamFile} isRecording={isRecording} recordVoiceMessage={recordVoiceMessage} sendTeamMessage={sendTeamMessage} Icon={Icon} Chip={Chip} AudioMessage={AudioMessage} Empty={Empty} /> : tab === 'My Profile' ? <ProfileScreen c={c} s={s} user={user} Icon={Icon} ageFromDOB={ageFromDOB} showForm={showForm} openSecuritySettings={openSecuritySettings} /> : tab === 'Admin Panel' ? <AdminScreen c={c} s={s} user={user} store={store} currency={currency} setCurrency={setCurrency} log={log} Chip={Chip} Metric={Metric} Empty={Empty} exchangeRateInput={exchangeRateInput} setExchangeRateInput={setExchangeRateInput} setExchangeRate={setExchangeRate} displayMoney={displayMoney} setTab={setTab} /> : <StaffScreen c={c} s={s} user={user} store={store} blue={blue} Icon={Icon} Badge={Badge} Empty={Empty} showForm={showForm} setEditingId={setEditingId} />;
+  const content = tab === 'Dashboard' ? <DashboardScreen c={c} s={s} user={user} store={store} unread={unread} todayRevenue={todayRevenue} todayCount={todayCount} todaySales={todaySales} lowStock={lowStock} Icon={Icon} Metric={Metric} SaleRow={SaleRow} ProductRow={ProductRow} displayMoney={displayMoney} blue={blue} setTab={setTab} setModal={setModal} setInventoryFilter={setInventoryFilter} showForm={showForm} stockAdjust={stockAdjust} /> : tab === 'Register' ? <RegisterScreen c={c} s={s} blue={blue} store={store} customer={customer} setCustomer={setCustomer} search={search} setSearch={setSearch} cameraPermission={cameraPermission} requestCameraPermission={requestCameraPermission} setBarcodeScanned={setBarcodeScanned} setModal={setModal} category={category} setCategory={setCategory} cart={cart} addLine={addLine} filteredProducts={filteredProducts} displayMoney={displayMoney} Icon={Icon} SearchBox={SearchBox} Chip={Chip} /> : tab === 'AI Deals' ? <AIDealsScreen c={c} s={s} messages={messages} Icon={Icon} Chip={Chip} displayMoney={displayMoney} sendMessage={sendMessage} addToCartFromDeal={addToCartFromDeal} /> : tab === 'Products' ? <ProductsScreen c={c} s={s} store={store} search={search} setSearch={setSearch} category={category} setCategory={setCategory} filteredProducts={filteredProducts} Icon={Icon} SearchBox={SearchBox} Chip={Chip} ProductRow={ProductRow} displayMoney={displayMoney} addLine={addLine} showForm={showForm} removeProduct={removeProduct} /> : tab === 'Inventory' ? <InventoryScreen c={c} s={s} store={store} lowStock={lowStock} inventoryFilter={inventoryFilter} setInventoryFilter={setInventoryFilter} Icon={Icon} Chip={Chip} ProductRow={ProductRow} Empty={Empty} stockAdjust={stockAdjust} /> : tab === 'Orders' ? <OrdersScreen c={c} s={s} user={user} sales={store.sales} canViewMyReports={canViewMyReports} Icon={Icon} SaleRow={SaleRow} displayMoney={displayMoney} refundSale={refundSale} /> : tab === 'Purchases' ? <PurchasesScreen c={c} s={s} store={store} Icon={Icon} Badge={Badge} displayMoney={displayMoney} showForm={showForm} receivePurchase={receivePurchase} /> : tab === 'Customers' ? <CustomersScreen c={c} s={s} store={store} peopleTab={peopleTab} setPeopleTab={setPeopleTab} showForm={showForm} Icon={Icon} displayMoney={displayMoney} ageFromDOB={ageFromDOB} blue={blue} green={green} /> : tab === 'Reports' ? <ReportsScreen c={c} s={s} store={store} user={user} canViewMyReports={canViewMyReports} reportRange={reportRange} setReportRange={setReportRange} Chip={Chip} Metric={Metric} ProgressLine={ProgressLine} ProductRow={ProductRow} displayMoney={displayMoney} green={green} amber={amber} /> : tab === 'Team Chat' ? <TeamChatScreen c={c} s={s} user={user} store={store} chatRecipient={chatRecipient} setChatRecipient={setChatRecipient} currentPeer={currentPeer} teamPeers={teamPeers} chatScrollRef={chatScrollRef} chatDraft={chatDraft} setChatDraft={setChatDraft} pickTeamFile={pickTeamFile} isRecording={isRecording} recordVoiceMessage={recordVoiceMessage} sendTeamMessage={sendTeamMessage} Icon={Icon} Chip={Chip} AudioMessage={AudioMessage} Empty={Empty} /> : tab === 'My Profile' ? <ProfileScreen c={c} s={s} user={user} Icon={Icon} ageFromDOB={ageFromDOB} showForm={showForm} openSecuritySettings={openSecuritySettings} /> : tab === 'Admin Panel' ? <AdminScreen c={c} s={s} user={user} store={store} currency={currency} setCurrency={setCurrency} log={log} Chip={Chip} Metric={Metric} Empty={Empty} exchangeRateInput={exchangeRateInput} setExchangeRateInput={setExchangeRateInput} setExchangeRate={setExchangeRate} displayMoney={displayMoney} setTab={setTab} /> : tab === 'Sync & Status' ? <SyncStatusScreen c={c} s={s} networkConnected={networkConnected} internetReachable={internetReachability} serverConfigured={Boolean(apiEndpoint)} serverReachable={serverReachable} syncing={syncing} lastSyncedAt={lastSyncedAt} queue={store.syncQueue} retryNow={retrySyncNow} Icon={Icon} /> : <StaffScreen c={c} s={s} user={user} store={store} blue={blue} Icon={Icon} Badge={Badge} Empty={Empty} showForm={showForm} setEditingId={setEditingId} />;
   const formFields: [string, string, string?][] = formKind === 'product' ? [['Product name', 'name'], ['SKU / Barcode', 'sku'], ['Category', 'category'], ['Brand', 'brand'], [`Cost price (${currency})`, 'cost', 'numeric'], [`Retail price (${currency})`, 'price', 'numeric'], ['Tax %', 'tax', 'numeric'], ['Stock on hand', 'stock', 'numeric'], ['Minimum stock alert', 'minimum', 'numeric'], ['Expiry date (YYYY-MM-DD)', 'expiry'], ['Batch number', 'batch']] : formKind === 'purchase' ? [['Supplier', 'supplier'], ['Product SKU', 'sku'], ['Quantity', 'quantity', 'numeric'], ['Unit cost', 'cost', 'numeric']] : formKind === 'staff' ? [['Full name', 'name'], ['Username', 'username'], ['Email', 'email'], ['Phone number', 'phone', 'numeric'], ['Date of birth (YYYY-MM-DD)', 'dateOfBirth'], ['Address', 'address']] : formKind === 'reset' ? [] : [['Full name', 'name'], ['Phone', 'phone'], ['Email', 'email'], ['Date of birth (YYYY-MM-DD)', 'dateOfBirth'], ['Address', 'address']];
   const hideMenu = () => setModal(null);
 
   return <View style={[s.root, { backgroundColor: c.bg }]}><StatusBar style={darkMode ? 'light' : 'dark'} />
-    <View style={[s.topBar, { backgroundColor: c.surface, borderColor: c.border }]}><Pressable onPress={() => setModal('menu')} style={[s.menuBtn, { backgroundColor: c.primarySoft }]}><Icon c={c} name="storefront-outline" color={c.primary} size={22} /></Pressable><View style={{ flex: 1 }}><Text style={[s.topTitle, { color: c.text }]}>{headerTitle}</Text><Text style={[s.topSubtitle, { color: c.muted }]}>{(user.role || 'STAFF').replaceAll('_', ' ')} · {user.name} · {sessionId&&appForeground ? 'Online' : 'Offline'}</Text></View>{user.photoUri ? <Image source={{uri:user.photoUri}} style={{width:34,height:34,borderRadius:18}} /> : <Pressable onPress={() => setTab('My Profile')} style={[s.iconBtnSmall,{backgroundColor:c.primarySoft}]}><Icon c={c} name='account-outline' color={c.primary} size={18} /></Pressable>}<Pressable onPress={() => setModal('notifications')} style={[s.iconBtnSmall, { backgroundColor: c.bg }]}><Icon c={c} name="bell-outline" size={19} /><View style={[s.smallDot, { backgroundColor: c.danger }]} /></Pressable><Pressable onPress={() => setDark(!dark)} style={[s.iconBtnSmall, { backgroundColor: c.bg }]}><Icon c={c} name={dark ? 'weather-sunny' : 'weather-night'} size={18} /></Pressable></View>
-    {tab==='Team Chat'?<KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'} keyboardVerticalOffset={Platform.OS==='ios'?80:0}><View style={{flex:1,paddingHorizontal:14,paddingBottom:4}}>{<TeamChatScreen c={c} s={s} user={user} store={store} chatRecipient={chatRecipient} setChatRecipient={setChatRecipient} currentPeer={currentPeer} teamPeers={teamPeers} chatScrollRef={chatScrollRef} chatDraft={chatDraft} setChatDraft={setChatDraft} pickTeamFile={pickTeamFile} isRecording={isRecording} recordVoiceMessage={recordVoiceMessage} sendTeamMessage={sendTeamMessage} Icon={Icon} Chip={Chip} AudioMessage={AudioMessage} Empty={Empty} />}</View></KeyboardAvoidingView>:<ScrollView keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>{tab !== 'Dashboard' && <View style={s.pageHeading}><Text style={[s.pageTitle, { color: c.text }]}>{tab}</Text><Text style={[s.subText, { color: c.muted }]}>{tab === 'Register' ? 'Search, scan and add items to this sale.' : tab === 'Inventory' ? 'Stock levels, expiry dates and adjustments.' : tab === 'AI Deals' ? 'Offers finder for your sales team.' : tab === 'Products' ? 'Catalog, prices and product details.' : tab === 'Orders' ? 'Receipts, returns and transaction history.' : tab === 'Purchases' ? 'Supplier orders and stock receiving.' : tab === 'Customers' ? 'Loyalty and supplier directory.' : tab === 'Reports' ? 'Store performance and sales analytics.' : 'People, permissions and activity history.'}</Text></View>}{content}</ScrollView>}
+    <View style={[s.topBar, { backgroundColor: c.surface, borderColor: c.border }]}><Pressable onPress={() => setModal('menu')} style={[s.menuBtn, { backgroundColor: c.primarySoft }]}><Icon c={c} name="storefront-outline" color={c.primary} size={22} /></Pressable><View style={{ flex: 1 }}><Text style={[s.topTitle, { color: c.text }]}>{headerTitle}</Text><Text style={[s.topSubtitle, { color: c.muted }]}>{(user.role || 'STAFF').replaceAll('_', ' ')} · {user.name} · {serverReachable ? 'POS server online' : !apiEndpoint ? 'Local-only mode' : networkConnected ? 'Server unavailable' : 'Device offline'}</Text></View>{user.photoUri ? <Image source={{uri:user.photoUri}} style={{width:34,height:34,borderRadius:18}} /> : <Pressable onPress={() => setTab('My Profile')} style={[s.iconBtnSmall,{backgroundColor:c.primarySoft}]}><Icon c={c} name='account-outline' color={c.primary} size={18} /></Pressable>}<Pressable onPress={() => setModal('notifications')} style={[s.iconBtnSmall, { backgroundColor: c.bg }]}><Icon c={c} name="bell-outline" size={19} /><View style={[s.smallDot, { backgroundColor: c.danger }]} /></Pressable><Pressable onPress={() => setDark(!dark)} style={[s.iconBtnSmall, { backgroundColor: c.bg }]}><Icon c={c} name={dark ? 'weather-sunny' : 'weather-night'} size={18} /></Pressable></View>
+    {tab==='Team Chat'?<KeyboardAvoidingView style={{flex:1}} behavior={Platform.OS==='ios'?'padding':'height'} keyboardVerticalOffset={Platform.OS==='ios'?80:0}><View style={{flex:1,paddingHorizontal:14,paddingBottom:4}}>{<TeamChatScreen c={c} s={s} user={user} store={store} chatRecipient={chatRecipient} setChatRecipient={setChatRecipient} currentPeer={currentPeer} teamPeers={teamPeers} chatScrollRef={chatScrollRef} chatDraft={chatDraft} setChatDraft={setChatDraft} pickTeamFile={pickTeamFile} isRecording={isRecording} recordVoiceMessage={recordVoiceMessage} sendTeamMessage={sendTeamMessage} Icon={Icon} Chip={Chip} AudioMessage={AudioMessage} Empty={Empty} />}</View></KeyboardAvoidingView>:<ScrollView keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets contentContainerStyle={s.scrollContent} showsVerticalScrollIndicator={false}>{tab !== 'Dashboard' && <View style={s.pageHeading}><Text style={[s.pageTitle, { color: c.text }]}>{tab}</Text><Text style={[s.subText, { color: c.muted }]}>{tab === 'Register' ? 'Search, scan and add items to this sale.' : tab === 'Inventory' ? 'Stock levels, expiry dates and adjustments.' : tab === 'AI Deals' ? 'Offers finder for your sales team.' : tab === 'Products' ? 'Catalog, prices and product details.' : tab === 'Orders' ? 'Receipts, returns and transaction history.' : tab === 'Purchases' ? 'Supplier orders and stock receiving.' : tab === 'Customers' ? 'Loyalty and supplier directory.' : tab === 'Reports' ? 'Store performance and sales analytics.' : tab === 'Sync & Status' ? 'Device/server connectivity and queued changes.' : 'People, permissions and activity history.'}</Text></View>}{content}</ScrollView>}
     <View style={[s.bottomNav, { backgroundColor: c.surface, borderColor: c.border }]}>{(['Dashboard', 'Register', 'Inventory', 'More'] as const).map(item => { const selected = item === 'More' ? !(['Dashboard', 'Register', 'Inventory'].includes(tab)) : tab === item; const icon: IconName = item === 'Dashboard' ? 'view-dashboard-outline' : item === 'Register' ? 'point-of-sale' : item === 'Inventory' ? 'package-variant-closed' : 'menu'; return <Pressable key={item} onPress={() => item === 'More' ? setModal('menu') : setTab(item)} style={s.navItem}><View style={[s.navIcon, selected && { backgroundColor: c.primarySoft }]}><Icon c={c} name={icon} size={21} color={selected ? c.primary : c.muted} /></View><Text style={[s.navLabel, { color: selected ? c.primary : c.muted }]}>{item}</Text></Pressable>; })}</View>
 
     <Modal visible={modal === 'menu'} transparent animationType="slide" onRequestClose={hideMenu}><View style={s.overlay}><Pressable style={s.backdrop} onPress={hideMenu} /><View style={[s.menuSheet, { backgroundColor: c.surface }]}><View style={s.sheetHandle} /><View style={s.menuSheetHead}><View><Text style={[s.sectionTitle, { color: c.text }]}>Retail POS</Text><Text style={[s.mini, { color: c.muted }]}>Store Terminal #104</Text></View><Pressable onPress={hideMenu}><Icon c={c} name="close" /></Pressable></View><View style={[s.profileStrip, { backgroundColor: c.primarySoft }]}><View style={[s.avatar, { backgroundColor: c.surface }]}><Text style={{ color: c.primary, fontWeight: '900' }}>{user.name.split(' ').map(n => n[0]).join('').slice(0, 2)}</Text></View><View style={{ flex: 1 }}><Text style={[s.rowTitle, { color: c.text }]}>{user.name}</Text><Text style={[s.mini, { color: c.muted }]}>{user.role} · Active cashier</Text></View><Pressable onPress={() => { hideMenu(); setDark(!dark); }}><Icon c={c} name={dark ? 'weather-sunny' : 'weather-night'} color={c.primary} /></Pressable></View><View style={s.moduleGrid}>{visibleModules.map(module => <Pressable key={module.name} onPress={() => { setTab(module.name); hideMenu(); }} style={[s.moduleCell, { borderColor: c.border, backgroundColor: tab === module.name ? c.primarySoft : c.bg }]}><Icon c={c} name={module.icon} color={tab === module.name ? c.primary : c.muted} size={21} /><Text style={[s.moduleText, { color: tab === module.name ? c.primary : c.text }]}>{module.name}</Text></Pressable>)}</View><Pressable onPress={goLogout} style={[s.logoutButton, { borderColor: '#FECACA' }]}><Icon c={c} name="logout" color={c.danger} /><Text style={{ color: c.danger, fontWeight: '800', marginLeft: 10 }}>Sign out / switch cashier</Text></Pressable></View></View></Modal>
